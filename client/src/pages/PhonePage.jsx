@@ -8,6 +8,7 @@ export default function PhonePage() {
   const [uploads, setUploads] = useState([]);
   const [sending, setSending] = useState(false);
   const inputRef = useRef(null);
+  const fileRef = useRef(null);
 
   useEffect(() => {
     fetch(`/api/session/${sessionId}`)
@@ -82,6 +83,28 @@ export default function PhonePage() {
     }
   }, [sessionId]);
 
+  const handleFileSelect = useCallback(async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setSending(true);
+    for (const file of files) {
+      const form = new FormData();
+      form.append('sticker', file, file.name);
+      try {
+        const res = await fetch(`/api/session/${sessionId}/upload`, { method: 'POST', body: form });
+        if (res.ok) {
+          const data = await res.json();
+          setUploads((prev) => [data, ...prev]);
+        }
+      } catch (err) {
+        console.error('Upload failed:', err);
+      }
+    }
+    setSending(false);
+    e.target.value = '';
+  }, [sessionId]);
+
   if (valid === null) return <div style={styles.center}>Loading...</div>;
   if (valid === false) {
     return (
@@ -101,9 +124,9 @@ export default function PhonePage() {
         </span>
       </div>
 
-      <h1 style={styles.heading}>Paste Stickers</h1>
+      <h1 style={styles.heading}>Send Stickers</h1>
       <p style={styles.instructions}>
-        Tap below, then open your sticker keyboard and tap a sticker. It will be sent to your computer.
+        Paste a sticker from your keyboard below, or choose an image from your photo library.
       </p>
 
       <div
@@ -114,6 +137,19 @@ export default function PhonePage() {
         style={styles.inputArea}
         data-placeholder="Tap here and paste a sticker..."
       />
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        multiple
+        onChange={handleFileSelect}
+        style={{ display: 'none' }}
+      />
+      <button onClick={() => fileRef.current?.click()} style={styles.photoBtn}>
+        Choose from Photos
+      </button>
+      <p style={styles.uploadHint}>Max 20 MB per file</p>
 
       {sending && <p style={styles.sendingText}>Sending...</p>}
 
@@ -164,6 +200,11 @@ const styles = {
     fontSize: '1rem', outline: 'none', lineHeight: 1.6,
     WebkitUserSelect: 'text', position: 'relative',
   },
+  photoBtn: {
+    width: '100%', padding: '0.85rem', marginTop: '1rem', fontSize: '1rem', fontWeight: 600,
+    background: '#007aff', color: '#fff', border: 'none', borderRadius: 12, cursor: 'pointer',
+  },
+  uploadHint: { fontSize: '0.75rem', color: '#86868b', textAlign: 'center', marginTop: '0.5rem' },
   sendingText: { color: '#007aff', fontSize: '0.9rem', marginTop: '0.75rem', fontWeight: 500 },
   history: { marginTop: '2rem' },
   historyLabel: { fontSize: '0.85rem', color: '#86868b', marginBottom: '0.5rem', fontWeight: 500 },

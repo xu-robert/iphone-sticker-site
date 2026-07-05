@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import StickerGrid from '../components/StickerGrid.jsx';
 import ConnectionStatus from '../components/ConnectionStatus.jsx';
@@ -10,6 +10,7 @@ export default function DesktopPage() {
   const [phoneConnected, setPhoneConnected] = useState(false);
   const [lanHost, setLanHost] = useState(null);
   const [loading, setLoading] = useState(true);
+  const fileRef = useRef(null);
 
   useEffect(() => {
     fetch('/api/host').then((r) => r.json()).then((d) => setLanHost(d));
@@ -66,6 +67,22 @@ export default function DesktopPage() {
     setStickers((prev) => prev.filter((s) => s.filename !== filename));
   }, [sessionId]);
 
+  const handleFileUpload = useCallback(async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    for (const file of files) {
+      const form = new FormData();
+      form.append('sticker', file, file.name);
+      try {
+        const res = await fetch(`/api/session/${sessionId}/upload`, { method: 'POST', body: form });
+        if (!res.ok) console.error('Upload rejected:', await res.text());
+      } catch (err) {
+        console.error('Upload failed:', err);
+      }
+    }
+    e.target.value = '';
+  }, [sessionId]);
+
   const handleNewSession = async () => {
     sessionStorage.removeItem('sticker_session');
     setStickers([]);
@@ -103,6 +120,21 @@ export default function DesktopPage() {
         </div>
       </div>
 
+      <div style={styles.uploadRow}>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={handleFileUpload}
+          style={{ display: 'none' }}
+        />
+        <button onClick={() => fileRef.current?.click()} style={styles.uploadBtn}>
+          Upload from Computer
+        </button>
+        <span style={styles.uploadHint}>Max 20 MB per file</span>
+      </div>
+
       <StickerGrid stickers={stickers} onDelete={handleDelete} />
     </>
   );
@@ -131,4 +163,10 @@ const styles = {
     fontSize: '0.8rem', color: '#007aff', background: 'none',
     border: 'none', cursor: 'pointer', padding: 0, fontWeight: 500,
   },
+  uploadRow: { marginBottom: '1.5rem' },
+  uploadBtn: {
+    padding: '0.6rem 1.25rem', fontSize: '0.9rem', fontWeight: 500,
+    background: '#007aff', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer',
+  },
+  uploadHint: { fontSize: '0.8rem', color: '#86868b', marginLeft: '0.75rem' },
 };

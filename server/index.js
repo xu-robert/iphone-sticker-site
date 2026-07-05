@@ -64,9 +64,9 @@ app.use(express.json());
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    cb(null, /^image\/(png|jpeg|webp|gif)$/.test(file.mimetype));
+    cb(null, file.mimetype.startsWith('image/'));
   },
 });
 
@@ -94,12 +94,24 @@ app.get('/api/session/:id', (req, res) => {
   res.json({ sessionId: session.id, stickers: session.stickers });
 });
 
-app.post('/api/session/:id/upload', upload.single('sticker'), (req, res) => {
+app.post('/api/session/:id/upload', (req, res) => {
+  upload.single('sticker')(req, res, (err) => {
+    if (err) {
+      console.error('Upload error:', err.message);
+      return res.status(400).json({ error: err.message });
+    }
+    handleUpload(req, res);
+  });
+});
+
+function handleUpload(req, res) {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: 'Session not found or expired' });
   if (!req.file) return res.status(400).json({ error: 'No image provided' });
 
-  const ext = req.file.mimetype.split('/')[1] === 'jpeg' ? 'jpg' : req.file.mimetype.split('/')[1];
+  const SUB_TO_EXT = { jpeg: 'jpg', 'x-png': 'png', svg: 'svg', 'svg+xml': 'svg' };
+  const sub = req.file.mimetype.split('/')[1];
+  const ext = SUB_TO_EXT[sub] || sub;
   const filename = `${crypto.randomUUID()}.${ext}`;
   const sessionDir = path.join(UPLOADS_DIR, req.params.id);
   fs.mkdirSync(sessionDir, { recursive: true });
@@ -114,7 +126,7 @@ app.post('/api/session/:id/upload', upload.single('sticker'), (req, res) => {
   broadcast(req.params.id, { type: 'new_sticker', ...sticker });
 
   res.json(sticker);
-});
+}
 
 app.delete('/api/session/:id/sticker/:filename', (req, res) => {
   const { id, filename } = req.params;
