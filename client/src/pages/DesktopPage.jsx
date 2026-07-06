@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import StickerGrid from '../components/StickerGrid.jsx';
+import EditModal from '../components/EditModal.jsx';
 import ConnectionStatus from '../components/ConnectionStatus.jsx';
 import { useWebSocket } from '../hooks/useWebSocket.js';
 
@@ -10,6 +11,7 @@ export default function DesktopPage() {
   const [phoneConnected, setPhoneConnected] = useState(false);
   const [lanHost, setLanHost] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [editingSticker, setEditingSticker] = useState(null);
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -83,6 +85,19 @@ export default function DesktopPage() {
     e.target.value = '';
   }, [sessionId]);
 
+  const handleEdit = useCallback((sticker) => {
+    setEditingSticker(sticker);
+  }, []);
+
+  const handleEditSave = useCallback((sticker, settings) => {
+    console.log('Save sticker edit:', sticker.filename, settings);
+    setEditingSticker(null);
+  }, []);
+
+  const handleEditCancel = useCallback(() => {
+    setEditingSticker(null);
+  }, []);
+
   const handleNewSession = async () => {
     sessionStorage.removeItem('sticker_session');
     setStickers([]);
@@ -135,7 +150,15 @@ export default function DesktopPage() {
         <span style={styles.uploadHint}>Max 20 MB per file</span>
       </div>
 
-      <StickerGrid stickers={stickers} onDelete={handleDelete} />
+      <StickerGrid stickers={stickers} onDelete={handleDelete} onEdit={handleEdit} />
+
+      {editingSticker && (
+        <EditModal
+          sticker={editingSticker}
+          onSave={handleEditSave}
+          onCancel={handleEditCancel}
+        />
+      )}
     </>
   );
 }
