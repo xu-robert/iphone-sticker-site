@@ -8,6 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "potrace": "^2.1.8",
     "qrcode.react": "^4.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

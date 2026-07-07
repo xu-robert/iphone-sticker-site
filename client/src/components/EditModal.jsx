@@ -1,9 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { traceContour } from '../helpers/contourTracing.js';
 
 const CUT_TYPES = [
-  { value: 'die-cut-tight', label: 'Die-Cut Tight' },
-  { value: 'die-cut-loose', label: 'Die-Cut Loose' },
-  { value: 'kiss-cut', label: 'Kiss-Cut' },
   { value: 'circle', label: 'Circle' },
 ];
 
@@ -30,13 +28,112 @@ function ToggleSwitch({ checked, onChange, disabled }) {
   );
 }
 
+function useContourTracing(imageUrl, outlineEnabled, outlineThickness) {
+  const [traceResult, setTraceResult] = useState(null);
+  const [tracing, setTracing] = useState(false);
+
+  useEffect(() => {
+    if (!outlineEnabled || !imageUrl) {
+      setTraceResult(null);
+      return;
+    }
+
+    let cancelled = false;
+    setTracing(true);
+
+    traceContour(imageUrl, outlineThickness).then((result) => {
+      if (!cancelled) {
+        setTraceResult(result);
+        setTracing(false);
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setTraceResult(null);
+        setTracing(false);
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [imageUrl, outlineEnabled, outlineThickness]);
+
+  return { traceResult, tracing };
+}
+
+function drawBezierPath(ctx, segments) {
+  if (segments.length === 0) return;
+  ctx.beginPath();
+  ctx.moveTo(segments[0].p0.x, segments[0].p0.y);
+  for (const s of segments) {
+    const isLine = s.cp1.x === s.p0.x && s.cp1.y === s.p0.y && s.cp2.x === s.p1.x && s.cp2.y === s.p1.y;
+    if (isLine) {
+      ctx.lineTo(s.p1.x, s.p1.y);
+    } else {
+      ctx.bezierCurveTo(s.cp1.x, s.cp1.y, s.cp2.x, s.cp2.y, s.p1.x, s.p1.y);
+    }
+  }
+  ctx.closePath();
+}
+
+function StickerCanvas({ imageUrl, outlineEnabled, outlineColor, outlineThickness, traceResult }) {
+  const canvasRef = useRef(null);
+  const imgRef = useRef(null);
+
+  useEffect(() => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      imgRef.current = img;
+      draw();
+    };
+    img.src = imageUrl;
+  }, [imageUrl]);
+
+  useEffect(() => {
+    if (imgRef.current) draw();
+  }, [outlineEnabled, outlineColor, outlineThickness, traceResult]);
+
+  function draw() {
+    const canvas = canvasRef.current;
+    const img = imgRef.current;
+    if (!canvas || !img) return;
+
+    const padding = outlineEnabled && traceResult ? outlineThickness + 2 : 0;
+    canvas.width = img.width + padding * 2;
+    canvas.height = img.height + padding * 2;
+
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (outlineEnabled && traceResult && traceResult.segments.length > 0) {
+      ctx.save();
+      ctx.translate(padding, padding);
+      drawBezierPath(ctx, traceResult.segments);
+      ctx.fillStyle = outlineColor;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.drawImage(img, padding, padding);
+  }
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+    />
+  );
+}
+
 export default function EditModal({ sticker, onSave, onCancel }) {
   const [outlineEnabled, setOutlineEnabled] = useState(false);
   const [outlineColor, setOutlineColor] = useState('#ffffff');
   const [outlineThickness, setOutlineThickness] = useState(3);
   const [bgRemovalEnabled, setBgRemovalEnabled] = useState(false);
-  const [cutType, setCutType] = useState('die-cut-tight');
-  const [padding, setPadding] = useState(10);
+  const [cutType, setCutType] = useState('circle');
+
+  const { traceResult, tracing } = useContourTracing(
+    sticker.imageUrl, outlineEnabled, outlineThickness
+  );
 
   useEffect(() => {
     const handleKey = (e) => { if (e.key === 'Escape') onCancel(); };
@@ -49,8 +146,37 @@ export default function EditModal({ sticker, onSave, onCancel }) {
   }, [onCancel]);
 
   const handleSave = useCallback(() => {
-    onSave(sticker, { outlineEnabled, outlineColor, outlineThickness, bgRemovalEnabled, cutType, padding });
-  }, [sticker, onSave, outlineEnabled, outlineColor, outlineThickness, bgRemovalEnabled, cutType, padding]);
+    if (!outlineEnabled || !traceResult || traceResult.segments.length === 0) {
+      onSave(sticker, { outlineEnabled, outlineColor, outlineThickness, bgRemovalEnabled, cutType });
+      return;
+    }
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const padding = outlineThickness + 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width + padding * 2;
+      canvas.height = img.height + padding * 2;
+      const ctx = canvas.getContext('2d');
+
+      ctx.save();
+      ctx.translate(padding, padding);
+      drawBezierPath(ctx, traceResult.segments);
+      ctx.fillStyle = outlineColor;
+      ctx.fill();
+      ctx.restore();
+
+      ctx.drawImage(img, padding, padding);
+
+      const processedUrl = canvas.toDataURL('image/png');
+      onSave(sticker, {
+        outlineEnabled, outlineColor, outlineThickness, bgRemovalEnabled, cutType,
+        processedImageUrl: processedUrl,
+      });
+    };
+    img.src = sticker.imageUrl;
+  }, [sticker, onSave, outlineEnabled, outlineColor, outlineThickness, bgRemovalEnabled, cutType, traceResult]);
 
   return (
     <div style={styles.backdrop} onClick={onCancel}>
@@ -63,7 +189,14 @@ export default function EditModal({ sticker, onSave, onCancel }) {
         <div style={styles.body}>
           <div style={styles.previewSection}>
             <div style={styles.previewWrap}>
-              <img src={sticker.imageUrl} alt="Sticker preview" style={styles.previewImg} />
+              <StickerCanvas
+                imageUrl={sticker.imageUrl}
+                outlineEnabled={outlineEnabled}
+                outlineColor={outlineColor}
+                outlineThickness={outlineThickness}
+                traceResult={traceResult}
+              />
+              {tracing && <div style={styles.tracingOverlay}>Tracing...</div>}
             </div>
           </div>
 
@@ -121,18 +254,7 @@ export default function EditModal({ sticker, onSave, onCancel }) {
               </div>
             </div>
 
-            <div style={styles.controlGroup}>
-              <h3 style={styles.groupTitle}>Padding</h3>
-              <div style={styles.controlRow}>
-                <input
-                  type="range" min={0} max={50}
-                  value={padding}
-                  onChange={(e) => setPadding(Number(e.target.value))}
-                  style={styles.slider}
-                />
-                <span style={styles.valueLabel}>{padding}px</span>
-              </div>
-            </div>
+
           </div>
         </div>
 
@@ -154,8 +276,8 @@ const styles = {
   modal: {
     background: '#fff', borderRadius: 16,
     boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
-    maxWidth: 640, width: '90vw', maxHeight: '90vh',
-    overflow: 'auto', display: 'flex', flexDirection: 'column',
+    maxWidth: 1200, width: '92vw', height: '90vh',
+    overflow: 'hidden', display: 'flex', flexDirection: 'column',
   },
   header: {
     padding: '1.25rem 1.5rem', borderBottom: '1px solid #f0f0f0',
@@ -167,18 +289,27 @@ const styles = {
     color: '#86868b', cursor: 'pointer', padding: '0 0.25rem', lineHeight: 1,
   },
   body: {
-    padding: '1.5rem', display: 'flex', gap: '1.5rem', flexWrap: 'wrap',
-    flex: 1, overflow: 'auto',
+    padding: '1.5rem', display: 'flex', gap: '1.5rem',
+    flex: 1, overflow: 'hidden', minHeight: 0,
   },
-  previewSection: { flex: '1 1 200px', display: 'flex', justifyContent: 'center' },
+  previewSection: {
+    flex: 3, display: 'flex', justifyContent: 'center', alignItems: 'center',
+    minWidth: 0, minHeight: 0,
+  },
   previewWrap: {
-    width: '100%', maxWidth: 280, aspectRatio: '1',
+    width: '100%', height: '100%', position: 'relative',
     background: 'repeating-conic-gradient(#e8e8e8 0% 25%, #fff 0% 50%) 0 0 / 20px 20px',
     borderRadius: 12, display: 'flex', alignItems: 'center',
-    justifyContent: 'center', padding: '1rem',
+    justifyContent: 'center', padding: '1.5rem',
   },
-  previewImg: { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' },
-  controlsSection: { flex: '1 1 260px' },
+  tracingOverlay: {
+    position: 'absolute', bottom: 12, left: '50%', transform: 'translateX(-50%)',
+    background: 'rgba(0,0,0,0.6)', color: '#fff', fontSize: '0.8rem',
+    padding: '0.3rem 0.8rem', borderRadius: 6,
+  },
+  controlsSection: {
+    flex: 1, minWidth: 220, maxWidth: 280, overflowY: 'auto',
+  },
   controlGroup: { marginBottom: '1.25rem' },
   groupTitle: {
     fontSize: '0.8rem', fontWeight: 600, color: '#86868b',
