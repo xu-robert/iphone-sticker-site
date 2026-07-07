@@ -6,6 +6,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import os from 'os';
+import sharp from 'sharp';
 import { createSession, getSession, addSticker, removeSticker } from './sessions.js';
 
 const PORT = process.env.PORT || 3001;
@@ -104,18 +105,37 @@ app.post('/api/session/:id/upload', (req, res) => {
   });
 });
 
-function handleUpload(req, res) {
+async function handleUpload(req, res) {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: 'Session not found or expired' });
   if (!req.file) return res.status(400).json({ error: 'No image provided' });
 
-  const SUB_TO_EXT = { jpeg: 'jpg', 'x-png': 'png', svg: 'svg', 'svg+xml': 'svg' };
-  const sub = req.file.mimetype.split('/')[1];
-  const ext = SUB_TO_EXT[sub] || sub;
+  let buffer = req.file.buffer;
+  let ext;
+
+  try {
+    const image = sharp(buffer);
+    const meta = await image.metadata();
+
+    if (meta.hasAlpha) {
+      buffer = await image.trim({ threshold: 10 }).png().toBuffer();
+      ext = 'png';
+    } else {
+      buffer = await image.trim({ threshold: 10 }).toBuffer();
+      const SUB_TO_EXT = { jpeg: 'jpg', 'x-png': 'png', svg: 'svg', 'svg+xml': 'svg' };
+      const sub = req.file.mimetype.split('/')[1];
+      ext = SUB_TO_EXT[sub] || sub;
+    }
+  } catch {
+    const SUB_TO_EXT = { jpeg: 'jpg', 'x-png': 'png', svg: 'svg', 'svg+xml': 'svg' };
+    const sub = req.file.mimetype.split('/')[1];
+    ext = SUB_TO_EXT[sub] || sub;
+  }
+
   const filename = `${crypto.randomUUID()}.${ext}`;
   const sessionDir = path.join(UPLOADS_DIR, req.params.id);
   fs.mkdirSync(sessionDir, { recursive: true });
-  fs.writeFileSync(path.join(sessionDir, filename), req.file.buffer);
+  fs.writeFileSync(path.join(sessionDir, filename), buffer);
 
   const sticker = {
     filename,
