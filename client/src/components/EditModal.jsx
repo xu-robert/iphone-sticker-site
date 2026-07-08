@@ -1,10 +1,16 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { traceContour } from '../helpers/contourTracing.js';
 
 const DEFAULT_SIZE_IN = 2;
 const MAX_SIZE_IN = 5;
 const RULER_HEIGHT = 24;
-const CUT_TYPES = [{ value: 'circle', label: 'Circle' }];
+
+const CUT_TYPES = [
+  { value: 'contour', label: 'Contour' },
+  { value: 'circle', label: 'Circle' },
+  { value: 'square', label: 'Square' },
+  { value: 'rounded', label: 'Rounded' },
+];
 
 function ToggleSwitch({ checked, onChange, disabled }) {
   return (
@@ -34,46 +40,29 @@ function formatDim(v) { return Math.round(v * 100) / 100; }
 
 function Ruler({ length, pxPerInch, unit, vertical }) {
   const maxVal = inchesToUnit(MAX_SIZE_IN, unit);
-  const step = unit === 'cm' ? 1 : 1;
-  const subStep = unit === 'cm' ? 0.5 : 0.5;
+  const subStep = 0.5;
   const ticks = [];
-
   for (let v = 0; v <= maxVal + 0.001; v += subStep) {
     const pos = unitToInches(v, unit) * pxPerInch;
     if (pos > length) break;
-    const isMajor = Math.abs(v - Math.round(v / step) * step) < 0.001;
+    const isMajor = Math.abs(v - Math.round(v)) < 0.001;
     const h = isMajor ? RULER_HEIGHT : RULER_HEIGHT * 0.5;
     ticks.push(
-      <line
-        key={v}
-        x1={vertical ? RULER_HEIGHT - h : pos}
-        y1={vertical ? pos : RULER_HEIGHT - h}
-        x2={vertical ? RULER_HEIGHT : pos}
-        y2={vertical ? pos : RULER_HEIGHT}
-        stroke="#b0b0b0" strokeWidth="1"
-      />
+      <line key={v}
+        x1={vertical ? RULER_HEIGHT - h : pos} y1={vertical ? pos : RULER_HEIGHT - h}
+        x2={vertical ? RULER_HEIGHT : pos} y2={vertical ? pos : RULER_HEIGHT}
+        stroke="#b0b0b0" strokeWidth="1" />
     );
     if (isMajor && v > 0) {
-      ticks.push(
-        vertical ? (
-          <text key={`t${v}`} x={4} y={pos + 4} fill="#86868b" style={{ fontSize: 9, fontFamily: 'system-ui' }}>{v}</text>
-        ) : (
-          <text key={`t${v}`} x={pos} y={10} fill="#86868b" textAnchor="middle" style={{ fontSize: 9, fontFamily: 'system-ui' }}>{v}</text>
-        )
+      ticks.push(vertical
+        ? <text key={`t${v}`} x={4} y={pos + 4} fill="#86868b" style={{ fontSize: 9, fontFamily: 'system-ui' }}>{v}</text>
+        : <text key={`t${v}`} x={pos} y={10} fill="#86868b" textAnchor="middle" style={{ fontSize: 9, fontFamily: 'system-ui' }}>{v}</text>
       );
     }
   }
-
   return (
-    <svg
-      width={vertical ? RULER_HEIGHT : length}
-      height={vertical ? length : RULER_HEIGHT}
-      style={{
-        position: 'absolute',
-        ...(vertical ? { left: 0, top: RULER_HEIGHT } : { top: 0, left: RULER_HEIGHT }),
-        overflow: 'hidden',
-      }}
-    >
+    <svg width={vertical ? RULER_HEIGHT : length} height={vertical ? length : RULER_HEIGHT}
+      style={{ position: 'absolute', ...(vertical ? { left: 0, top: RULER_HEIGHT } : { top: 0, left: RULER_HEIGHT }), overflow: 'hidden' }}>
       <rect width="100%" height="100%" fill="#fafafa" />
       {ticks}
     </svg>
@@ -92,70 +81,166 @@ function drawBezierPath(ctx, segments) {
   ctx.closePath();
 }
 
-function useContourTracing(imageUrl, outlineEnabled, outlineThicknessPx) {
+function drawCutShapePath(ctx, cutType, w, h) {
+  const r = Math.min(w, h) * 0.15;
+  if (cutType === 'circle') {
+    ctx.beginPath();
+    ctx.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+    ctx.closePath();
+  } else if (cutType === 'square') {
+    ctx.beginPath();
+    ctx.rect(0, 0, w, h);
+    ctx.closePath();
+  } else if (cutType === 'rounded') {
+    ctx.beginPath();
+    ctx.moveTo(r, 0); ctx.lineTo(w - r, 0); ctx.arcTo(w, 0, w, r, r);
+    ctx.lineTo(w, h - r); ctx.arcTo(w, h, w - r, h, r);
+    ctx.lineTo(r, h); ctx.arcTo(0, h, 0, h - r, r);
+    ctx.lineTo(0, r); ctx.arcTo(0, 0, r, 0, r);
+    ctx.closePath();
+  }
+}
+
+function useDraggable(initialPos, initialSizeIn, pxPerInch, aspectRatio, onPosChange, onSizeChange) {
+  const draggingRef = useRef(false);
+
+  const handleMoveStart = useCallback((e) => {
+    if (draggingRef.current) return;
+    e.preventDefault();
+    draggingRef.current = 'move';
+    const startX = e.clientX, startY = e.clientY;
+    const startPos = { ...initialPos };
+    function onMove(e) {
+      if (draggingRef.current !== 'move') return;
+      onPosChange({ x: startPos.x + (e.clientX - startX), y: startPos.y + (e.clientY - startY) });
+    }
+    function onUp() { draggingRef.current = false; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [initialPos, onPosChange]);
+
+  const handleResizeStart = useCallback((e) => {
+    e.preventDefault(); e.stopPropagation();
+    draggingRef.current = 'resize';
+    const startX = e.clientX, startY = e.clientY;
+    const startW = initialSizeIn;
+    function onMove(e) {
+      if (draggingRef.current !== 'resize') return;
+      const dx = e.clientX - startX, dy = e.clientY - startY;
+      const delta = (Math.abs(dx) > Math.abs(dy) ? dx : dy) / pxPerInch;
+      let newW = Math.max(0.25, Math.min(MAX_SIZE_IN, startW + delta));
+      if (aspectRatio && newW / aspectRatio > MAX_SIZE_IN) newW = MAX_SIZE_IN * aspectRatio;
+      onSizeChange(newW);
+    }
+    function onUp() { draggingRef.current = false; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [initialSizeIn, pxPerInch, aspectRatio, onSizeChange]);
+
+  return { handleMoveStart, handleResizeStart };
+}
+
+function useContourTracing(compositeUrl, outlineEnabled, outlineThicknessPx) {
   const [traceResult, setTraceResult] = useState(null);
   const [tracing, setTracing] = useState(false);
-
   useEffect(() => {
-    if (!outlineEnabled || !imageUrl) { setTraceResult(null); return; }
+    if (!outlineEnabled || !compositeUrl) { setTraceResult(null); return; }
     let cancelled = false;
     setTracing(true);
-    traceContour(imageUrl, outlineThicknessPx).then((result) => {
+    traceContour(compositeUrl, outlineThicknessPx).then((result) => {
       if (!cancelled) { setTraceResult(result); setTracing(false); }
-    }).catch(() => {
-      if (!cancelled) { setTraceResult(null); setTracing(false); }
-    });
+    }).catch(() => { if (!cancelled) { setTraceResult(null); setTracing(false); } });
     return () => { cancelled = true; };
-  }, [imageUrl, outlineEnabled, outlineThicknessPx]);
-
+  }, [compositeUrl, outlineEnabled, outlineThicknessPx]);
   return { traceResult, tracing };
 }
 
-function useImageDimensions(imageUrl) {
-  const [dims, setDims] = useState(null);
+function useImageElement(imageUrl) {
+  const [img, setImg] = useState(null);
   useEffect(() => {
     if (!imageUrl) return;
-    const img = new Image();
-    img.onload = () => setDims({ width: img.width, height: img.height });
-    img.src = imageUrl;
+    const el = new Image();
+    el.crossOrigin = 'anonymous';
+    el.onload = () => setImg(el);
+    el.src = imageUrl;
   }, [imageUrl]);
-  return dims;
+  return img;
 }
 
-function StickerCanvas({ imageUrl, outlineEnabled, outlineColor, outlineThicknessPx, traceResult }) {
-  const canvasRef = useRef(null);
-  const imgRef = useRef(null);
+function DraggableObject({ pos, widthPx, heightPx, onMoveStart, onResizeStart, selected, children }) {
+  return (
+    <div
+      onMouseDown={onMoveStart}
+      style={{
+        position: 'absolute', left: pos.x, top: pos.y,
+        width: widthPx, height: heightPx, cursor: 'grab',
+        outline: selected ? '2px dashed #007aff' : 'none',
+        outlineOffset: 2,
+      }}
+    >
+      {children}
+      <div onMouseDown={onResizeStart} style={styles.dragHandle} />
+    </div>
+  );
+}
 
-  useEffect(() => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => { imgRef.current = img; draw(); };
-    img.src = imageUrl;
-  }, [imageUrl]);
+function buildCompositeDataUrl(img, cutType, cutBgColor, shapeWidthPx, shapeHeightPx, stickerOffsetX, stickerOffsetY) {
+  const minX = Math.min(0, stickerOffsetX);
+  const minY = Math.min(0, stickerOffsetY);
+  const maxX = Math.max(shapeWidthPx, stickerOffsetX + img.width);
+  const maxY = Math.max(shapeHeightPx, stickerOffsetY + img.height);
+  const totalW = Math.round(maxX - minX);
+  const totalH = Math.round(maxY - minY);
 
-  useEffect(() => { if (imgRef.current) draw(); }, [outlineEnabled, outlineColor, outlineThicknessPx, traceResult]);
+  const canvas = document.createElement('canvas');
+  canvas.width = totalW;
+  canvas.height = totalH;
+  const ctx = canvas.getContext('2d');
 
-  function draw() {
-    const canvas = canvasRef.current;
-    const img = imgRef.current;
-    if (!canvas || !img) return;
-    const padding = outlineEnabled && traceResult ? outlineThicknessPx + 2 : 0;
-    canvas.width = img.width + padding * 2;
-    canvas.height = img.height + padding * 2;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (outlineEnabled && traceResult && traceResult.segments.length > 0) {
-      ctx.save();
-      ctx.translate(padding, padding);
-      drawBezierPath(ctx, traceResult.segments);
-      ctx.fillStyle = outlineColor;
-      ctx.fill();
-      ctx.restore();
-    }
-    ctx.drawImage(img, padding, padding);
+  if (cutType !== 'contour') {
+    ctx.save();
+    ctx.translate(-minX, -minY);
+    drawCutShapePath(ctx, cutType, shapeWidthPx, shapeHeightPx);
+    ctx.fillStyle = cutBgColor;
+    ctx.fill();
+    ctx.restore();
   }
 
-  return <canvas ref={canvasRef} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />;
+  ctx.drawImage(img, stickerOffsetX - minX, stickerOffsetY - minY);
+  return { dataUrl: canvas.toDataURL('image/png'), minX, minY, totalW, totalH };
+}
+
+function renderFinal(img, cutType, cutBgColor, shapeWidthPx, shapeHeightPx, stickerOffsetX, stickerOffsetY, outlineEnabled, outlineColor, outlineThicknessPx, traceResult) {
+  const minX = Math.min(0, stickerOffsetX);
+  const minY = Math.min(0, stickerOffsetY);
+  const maxX = Math.max(shapeWidthPx, stickerOffsetX + img.width);
+  const maxY = Math.max(shapeHeightPx, stickerOffsetY + img.height);
+  const compW = Math.round(maxX - minX);
+  const compH = Math.round(maxY - minY);
+  const pad = outlineEnabled && traceResult ? outlineThicknessPx + 2 : 0;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = compW + pad * 2;
+  canvas.height = compH + pad * 2;
+  const ctx = canvas.getContext('2d');
+
+  if (outlineEnabled && traceResult && traceResult.segments.length > 0) {
+    ctx.save(); ctx.translate(pad, pad);
+    drawBezierPath(ctx, traceResult.segments);
+    ctx.fillStyle = outlineColor; ctx.fill(); ctx.restore();
+  }
+
+  if (cutType !== 'contour') {
+    ctx.save();
+    ctx.translate(pad - minX, pad - minY);
+    drawCutShapePath(ctx, cutType, shapeWidthPx, shapeHeightPx);
+    ctx.fillStyle = cutBgColor;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  ctx.drawImage(img, pad + stickerOffsetX - minX, pad + stickerOffsetY - minY);
+  return canvas.toDataURL('image/png');
 }
 
 export default function EditModal({ sticker, onSave, onCancel }) {
@@ -166,41 +251,62 @@ export default function EditModal({ sticker, onSave, onCancel }) {
   const [unit, setUnit] = useState(prev.unit || 'in');
   const [stickerWidthIn, setStickerWidthIn] = useState(prev.stickerWidthIn ?? null);
   const [bgRemovalEnabled, setBgRemovalEnabled] = useState(prev.bgRemovalEnabled || false);
-  const [cutType, setCutType] = useState(prev.cutType || 'circle');
-  const [stickerPos, setStickerPos] = useState({ x: 20, y: 20 });
-  const workspaceRef = useRef(null);
-  const draggingRef = useRef(false);
+  const [cutType, setCutType] = useState(prev.cutType || 'contour');
+  const [cutBgColor, setCutBgColor] = useState(prev.cutBgColor || '#ffffff');
+  const [shapeWidthIn, setShapeWidthIn] = useState(prev.shapeWidthIn ?? null);
 
-  const imageDims = useImageDimensions(sticker.imageUrl);
-  const aspectRatio = imageDims ? imageDims.width / imageDims.height : 1;
+  const [stickerPos, setStickerPos] = useState({ x: 40, y: 40 });
+  const [shapePos, setShapePos] = useState({ x: 20, y: 20 });
+
+  const workspaceRef = useRef(null);
+
+  const img = useImageElement(sticker.imageUrl);
+  const imageDims = img ? { width: img.width, height: img.height } : null;
+  const stickerAspect = imageDims ? imageDims.width / imageDims.height : 1;
 
   useEffect(() => {
     if (!imageDims || stickerWidthIn !== null) return;
     const longer = Math.max(imageDims.width, imageDims.height);
-    setStickerWidthIn(DEFAULT_SIZE_IN * imageDims.width / longer);
+    const wIn = DEFAULT_SIZE_IN * imageDims.width / longer;
+    setStickerWidthIn(wIn);
+    setShapeWidthIn(wIn * 1.2);
   }, [imageDims]);
 
-  const stickerHeightIn = stickerWidthIn !== null ? stickerWidthIn / aspectRatio : null;
+  const stickerHeightIn = stickerWidthIn !== null ? stickerWidthIn / stickerAspect : null;
+  const shapeHeightIn = shapeWidthIn !== null ? shapeWidthIn : null; // shapes are 1:1 for circle/square, free for rounded
+  const shapeAspect = cutType === 'rounded' ? stickerAspect : 1;
+  const shapeHIn = shapeWidthIn !== null ? shapeWidthIn / shapeAspect : null;
 
   const [workspaceSize, setWorkspaceSize] = useState({ w: 400, h: 400 });
   useEffect(() => {
     const el = workspaceRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      setWorkspaceSize({ w: entry.contentRect.width, h: entry.contentRect.height });
-    });
+    const ro = new ResizeObserver(([entry]) => setWorkspaceSize({ w: entry.contentRect.width, h: entry.contentRect.height }));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
   const pxPerInch = Math.min(workspaceSize.w, workspaceSize.h) / MAX_SIZE_IN;
-  const stickerPxW = stickerWidthIn ? stickerWidthIn * pxPerInch : 0;
-  const stickerPxH = stickerHeightIn ? stickerHeightIn * pxPerInch : 0;
-
   const effectiveDpi = imageDims && stickerWidthIn ? imageDims.width / stickerWidthIn : 300;
   const outlineThicknessPx = Math.max(1, Math.round(unitToInches(outlineThickness, unit) * effectiveDpi));
 
-  const { traceResult, tracing } = useContourTracing(sticker.imageUrl, outlineEnabled, outlineThicknessPx);
+  const stickerPxW = stickerWidthIn ? stickerWidthIn * pxPerInch : 0;
+  const stickerPxH = stickerHeightIn ? stickerHeightIn * pxPerInch : 0;
+  const shapePxW = shapeWidthIn ? shapeWidthIn * pxPerInch : 0;
+  const shapePxH = shapeHIn ? shapeHIn * pxPerInch : 0;
+
+  const shapeWidthImgPx = shapeWidthIn ? Math.round(shapeWidthIn * effectiveDpi) : 0;
+  const shapeHeightImgPx = shapeHIn ? Math.round(shapeHIn * effectiveDpi) : 0;
+  const stickerOffsetXImgPx = imageDims ? Math.round((stickerPos.x - shapePos.x) / pxPerInch * effectiveDpi) : 0;
+  const stickerOffsetYImgPx = imageDims ? Math.round((stickerPos.y - shapePos.y) / pxPerInch * effectiveDpi) : 0;
+
+  const composite = useMemo(() => {
+    if (!img || cutType === 'contour') return null;
+    return buildCompositeDataUrl(img, cutType, cutBgColor, shapeWidthImgPx, shapeHeightImgPx, stickerOffsetXImgPx, stickerOffsetYImgPx);
+  }, [img, cutType, cutBgColor, shapeWidthImgPx, shapeHeightImgPx, stickerOffsetXImgPx, stickerOffsetYImgPx]);
+
+  const traceUrl = cutType === 'contour' ? sticker.imageUrl : composite?.dataUrl;
+  const { traceResult, tracing } = useContourTracing(traceUrl, outlineEnabled, outlineThicknessPx);
 
   useEffect(() => {
     const handleKey = (e) => { if (e.key === 'Escape') onCancel(); };
@@ -209,71 +315,16 @@ export default function EditModal({ sticker, onSave, onCancel }) {
     return () => { document.removeEventListener('keydown', handleKey); document.body.style.overflow = ''; };
   }, [onCancel]);
 
-  const handleResizeStart = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    draggingRef.current = 'resize';
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const startW = stickerWidthIn;
-
-    function onMove(e) {
-      if (draggingRef.current !== 'resize') return;
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
-      const delta = (Math.abs(dx) > Math.abs(dy) ? dx : dy) / pxPerInch;
-      const newW = Math.max(0.25, Math.min(MAX_SIZE_IN, startW + delta));
-      const newH = newW / aspectRatio;
-      if (newH <= MAX_SIZE_IN) setStickerWidthIn(newW);
-      else setStickerWidthIn(MAX_SIZE_IN * aspectRatio);
-    }
-    function onUp() {
-      draggingRef.current = false;
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    }
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  }, [stickerWidthIn, pxPerInch, aspectRatio]);
-
-  const handleMoveStart = useCallback((e) => {
-    if (draggingRef.current) return;
-    e.preventDefault();
-    draggingRef.current = 'move';
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const startPos = { ...stickerPos };
-
-    function onMove(e) {
-      if (draggingRef.current !== 'move') return;
-      setStickerPos({
-        x: startPos.x + (e.clientX - startX),
-        y: startPos.y + (e.clientY - startY),
-      });
-    }
-    function onUp() {
-      draggingRef.current = false;
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    }
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  }, [stickerPos]);
+  const stickerDrag = useDraggable(stickerPos, stickerWidthIn, pxPerInch, stickerAspect, setStickerPos, setStickerWidthIn);
+  const shapeDrag = useDraggable(shapePos, shapeWidthIn, pxPerInch, shapeAspect, setShapePos, setShapeWidthIn);
 
   const handleWidthChange = (val) => {
-    const wIn = unitToInches(parseFloat(val) || 0.25, unit);
-    const hIn = wIn / aspectRatio;
-    if (wIn > MAX_SIZE_IN) setStickerWidthIn(MAX_SIZE_IN);
-    else if (hIn > MAX_SIZE_IN) setStickerWidthIn(MAX_SIZE_IN * aspectRatio);
-    else setStickerWidthIn(Math.max(0.25, wIn));
+    const wIn = Math.max(0.25, Math.min(MAX_SIZE_IN, unitToInches(parseFloat(val) || 0.25, unit)));
+    setStickerWidthIn(wIn / stickerAspect > MAX_SIZE_IN ? MAX_SIZE_IN * stickerAspect : wIn);
   };
-
   const handleHeightChange = (val) => {
-    const hIn = unitToInches(parseFloat(val) || 0.25, unit);
-    const wIn = hIn * aspectRatio;
-    if (hIn > MAX_SIZE_IN) setStickerWidthIn(MAX_SIZE_IN * aspectRatio);
-    else if (wIn > MAX_SIZE_IN) setStickerWidthIn(MAX_SIZE_IN);
-    else setStickerWidthIn(Math.max(0.25, hIn * aspectRatio));
+    const hIn = Math.max(0.25, Math.min(MAX_SIZE_IN, unitToInches(parseFloat(val) || 0.25, unit)));
+    setStickerWidthIn(hIn * stickerAspect > MAX_SIZE_IN ? MAX_SIZE_IN : hIn * stickerAspect);
   };
 
   const handleSave = useCallback(() => {
@@ -282,33 +333,44 @@ export default function EditModal({ sticker, onSave, onCancel }) {
     const settings = {
       outlineEnabled, outlineColor, outlineThickness, outlineThicknessPx,
       unit, stickerWidth: displayW, stickerHeight: displayH,
-      stickerWidthIn, stickerHeightIn, bgRemovalEnabled, cutType,
+      stickerWidthIn, stickerHeightIn, bgRemovalEnabled,
+      cutType, cutBgColor, shapeWidthIn,
     };
-    if (!outlineEnabled || !traceResult || traceResult.segments.length === 0) {
-      onSave(sticker, settings); return;
+    if (!img) { onSave(sticker, settings); return; }
+
+    let processedUrl;
+    if (cutType === 'contour') {
+      if (outlineEnabled && traceResult && traceResult.segments.length > 0) {
+        const pad = outlineThicknessPx + 2;
+        const c = document.createElement('canvas');
+        c.width = img.width + pad * 2; c.height = img.height + pad * 2;
+        const ctx = c.getContext('2d');
+        ctx.save(); ctx.translate(pad, pad);
+        drawBezierPath(ctx, traceResult.segments);
+        ctx.fillStyle = outlineColor; ctx.fill(); ctx.restore();
+        ctx.drawImage(img, pad, pad);
+        processedUrl = c.toDataURL('image/png');
+      } else {
+        processedUrl = sticker.imageUrl;
+      }
+    } else {
+      processedUrl = renderFinal(img, cutType, cutBgColor, shapeWidthImgPx, shapeHeightImgPx, stickerOffsetXImgPx, stickerOffsetYImgPx, outlineEnabled, outlineColor, outlineThicknessPx, traceResult);
     }
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const padding = outlineThicknessPx + 2;
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width + padding * 2;
-      canvas.height = img.height + padding * 2;
-      const ctx = canvas.getContext('2d');
-      ctx.save(); ctx.translate(padding, padding);
-      drawBezierPath(ctx, traceResult.segments);
-      ctx.fillStyle = outlineColor; ctx.fill(); ctx.restore();
-      ctx.drawImage(img, padding, padding);
-      onSave(sticker, { ...settings, processedImageUrl: canvas.toDataURL('image/png') });
-    };
-    img.src = sticker.imageUrl;
-  }, [sticker, onSave, outlineEnabled, outlineColor, outlineThickness, outlineThicknessPx, unit, stickerWidthIn, stickerHeightIn, bgRemovalEnabled, cutType, traceResult]);
+    onSave(sticker, { ...settings, processedImageUrl: processedUrl });
+  }, [sticker, onSave, img, outlineEnabled, outlineColor, outlineThickness, outlineThicknessPx, unit, stickerWidthIn, stickerHeightIn, bgRemovalEnabled, cutType, cutBgColor, shapeWidthIn, shapeWidthImgPx, shapeHeightImgPx, stickerOffsetXImgPx, stickerOffsetYImgPx, traceResult]);
 
   const unitLabel = unit === 'cm' ? 'cm' : '"';
   const thicknessStep = unit === 'cm' ? 0.05 : 0.02;
   const thicknessMax = unit === 'cm' ? 1.5 : 0.5;
   const displayW = stickerWidthIn !== null ? formatDim(inchesToUnit(stickerWidthIn, unit)) : '';
   const displayH = stickerHeightIn !== null ? formatDim(inchesToUnit(stickerHeightIn, unit)) : '';
+  const showCutOptions = cutType !== 'contour';
+
+  const objectsOverlap = cutType === 'contour' || (
+    stickerPos.x < shapePos.x + shapePxW && stickerPos.x + stickerPxW > shapePos.x &&
+    stickerPos.y < shapePos.y + shapePxH && stickerPos.y + stickerPxH > shapePos.y
+  );
+  const outlineError = outlineEnabled && !objectsOverlap;
 
   return (
     <div style={styles.backdrop} onClick={onCancel}>
@@ -324,33 +386,47 @@ export default function EditModal({ sticker, onSave, onCancel }) {
               <div style={{ position: 'absolute', top: 0, left: 0, width: RULER_HEIGHT, height: RULER_HEIGHT, background: '#fafafa' }} />
               <Ruler length={workspaceSize.w} pxPerInch={pxPerInch} unit={unit} />
               <Ruler length={workspaceSize.h} pxPerInch={pxPerInch} unit={unit} vertical />
-              <div
-                ref={workspaceRef}
-                style={styles.workspace}
-              >
-                {stickerWidthIn !== null && (
-                  <div
-                    onMouseDown={handleMoveStart}
+              <div ref={workspaceRef} style={styles.workspace}>
+                {/* Outline — rendered first so it's behind everything */}
+                {outlineEnabled && !outlineError && traceResult && traceResult.segments.length > 0 && (
+                  <svg
                     style={{
-                      position: 'absolute', left: stickerPos.x, top: stickerPos.y,
-                      width: stickerPxW, height: stickerPxH, cursor: 'grab',
+                      position: 'absolute', pointerEvents: 'none',
+                      left: (cutType === 'contour' ? stickerPos.x : Math.min(stickerPos.x, shapePos.x)) - (outlineThicknessPx + 2) * pxPerInch / effectiveDpi,
+                      top: (cutType === 'contour' ? stickerPos.y : Math.min(stickerPos.y, shapePos.y)) - (outlineThicknessPx + 2) * pxPerInch / effectiveDpi,
                     }}
+                    width={(composite ? composite.totalW : img?.width || 0) * pxPerInch / effectiveDpi + (outlineThicknessPx + 2) * 2 * pxPerInch / effectiveDpi}
+                    height={(composite ? composite.totalH : img?.height || 0) * pxPerInch / effectiveDpi + (outlineThicknessPx + 2) * 2 * pxPerInch / effectiveDpi}
+                    viewBox={`0 0 ${(composite ? composite.totalW : img?.width || 0) + (outlineThicknessPx + 2) * 2} ${(composite ? composite.totalH : img?.height || 0) + (outlineThicknessPx + 2) * 2}`}
                   >
-                    <StickerCanvas
-                      imageUrl={sticker.imageUrl}
-                      outlineEnabled={outlineEnabled}
-                      outlineColor={outlineColor}
-                      outlineThicknessPx={outlineThicknessPx}
-                      traceResult={traceResult}
-                    />
-                    <div
-                      onMouseDown={handleResizeStart}
-                      style={styles.dragHandle}
-                      title="Drag to resize"
-                    />
-                  </div>
+                    <g transform={`translate(${outlineThicknessPx + 2},${outlineThicknessPx + 2})`}>
+                      <path d={traceResult.svgPath} fill={outlineColor} />
+                    </g>
+                  </svg>
                 )}
+
+                {/* Cut shape */}
+                {showCutOptions && shapeWidthIn !== null && (
+                  <DraggableObject pos={shapePos} widthPx={shapePxW} heightPx={shapePxH}
+                    onMoveStart={shapeDrag.handleMoveStart} onResizeStart={shapeDrag.handleResizeStart} selected={false}>
+                    <svg width="100%" height="100%" viewBox={`0 0 ${shapePxW} ${shapePxH}`} style={{ position: 'absolute', top: 0, left: 0 }}>
+                      {cutType === 'circle' && <ellipse cx={shapePxW / 2} cy={shapePxH / 2} rx={shapePxW / 2} ry={shapePxH / 2} fill={cutBgColor} />}
+                      {cutType === 'square' && <rect width={shapePxW} height={shapePxH} fill={cutBgColor} />}
+                      {cutType === 'rounded' && <rect width={shapePxW} height={shapePxH} rx={Math.min(shapePxW, shapePxH) * 0.15} fill={cutBgColor} />}
+                    </svg>
+                  </DraggableObject>
+                )}
+
+                {/* Sticker */}
+                {stickerWidthIn !== null && img && (
+                  <DraggableObject pos={stickerPos} widthPx={stickerPxW} heightPx={stickerPxH}
+                    onMoveStart={stickerDrag.handleMoveStart} onResizeStart={stickerDrag.handleResizeStart} selected={false}>
+                    <img src={sticker.imageUrl} alt="Sticker" style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} />
+                  </DraggableObject>
+                )}
+
                 {tracing && <div style={styles.tracingOverlay}>Tracing...</div>}
+                {outlineError && <div style={styles.errorOverlay}>Sticker and shape must overlap to enable outline</div>}
               </div>
             </div>
           </div>
@@ -370,58 +446,19 @@ export default function EditModal({ sticker, onSave, onCancel }) {
               </div>
               <div style={styles.controlRow}>
                 <span style={styles.label}>Width</span>
-                <input type="number" min={0.25} step={0.1}
-                  max={formatDim(inchesToUnit(MAX_SIZE_IN, unit))}
-                  value={displayW} onChange={(e) => handleWidthChange(e.target.value)}
-                  style={styles.numberInput}
-                />
+                <input type="number" min={0.25} step={0.1} max={formatDim(inchesToUnit(MAX_SIZE_IN, unit))}
+                  value={displayW} onChange={(e) => handleWidthChange(e.target.value)} style={styles.numberInput} />
                 <span style={styles.valueLabel}>{unitLabel}</span>
               </div>
               <div style={styles.controlRow}>
                 <span style={styles.label}>Height</span>
-                <input type="number" min={0.25} step={0.1}
-                  max={formatDim(inchesToUnit(MAX_SIZE_IN, unit))}
-                  value={displayH} onChange={(e) => handleHeightChange(e.target.value)}
-                  style={styles.numberInput}
-                />
+                <input type="number" min={0.25} step={0.1} max={formatDim(inchesToUnit(MAX_SIZE_IN, unit))}
+                  value={displayH} onChange={(e) => handleHeightChange(e.target.value)} style={styles.numberInput} />
                 <span style={styles.valueLabel}>{unitLabel}</span>
               </div>
               {imageDims && (
                 <p style={styles.hint}>{imageDims.width} &times; {imageDims.height} px ({Math.round(effectiveDpi)} DPI)</p>
               )}
-            </div>
-
-            <div style={styles.controlGroup}>
-              <h3 style={styles.groupTitle}>Outline / Border</h3>
-              <div style={styles.controlRow}>
-                <span style={styles.label}>Enable outline</span>
-                <ToggleSwitch checked={outlineEnabled} onChange={setOutlineEnabled} />
-              </div>
-              <div style={{ ...styles.controlRow, opacity: outlineEnabled ? 1 : 0.4 }}>
-                <span style={styles.label}>Color</span>
-                <input type="color" value={outlineColor}
-                  onChange={(e) => setOutlineColor(e.target.value)}
-                  disabled={!outlineEnabled} style={styles.colorInput}
-                />
-              </div>
-              <div style={{ ...styles.controlRow, opacity: outlineEnabled ? 1 : 0.4 }}>
-                <span style={styles.label}>Thickness</span>
-                <input type="number" min={thicknessStep} max={thicknessMax} step={thicknessStep}
-                  value={outlineThickness}
-                  onChange={(e) => setOutlineThickness(parseFloat(e.target.value) || 0)}
-                  disabled={!outlineEnabled} style={styles.numberInput}
-                />
-                <span style={styles.valueLabel}>{unitLabel}</span>
-              </div>
-            </div>
-
-            <div style={styles.controlGroup}>
-              <h3 style={styles.groupTitle}>Background</h3>
-              <div style={styles.controlRow}>
-                <span style={styles.label}>Remove background</span>
-                <ToggleSwitch checked={bgRemovalEnabled} onChange={setBgRemovalEnabled} />
-              </div>
-              <p style={styles.hint}>Coming soon</p>
             </div>
 
             <div style={styles.controlGroup}>
@@ -433,6 +470,54 @@ export default function EditModal({ sticker, onSave, onCancel }) {
                   >{t.label}</button>
                 ))}
               </div>
+              {showCutOptions && (
+                <>
+                  <div style={{ ...styles.controlRow, marginTop: '0.5rem' }}>
+                    <span style={styles.label}>Background</span>
+                    <input type="color" value={cutBgColor} onChange={(e) => setCutBgColor(e.target.value)} style={styles.colorInput} />
+                  </div>
+                  <div style={styles.controlRow}>
+                    <span style={styles.label}>Shape size</span>
+                    <input type="number" min={0.25} step={0.1} max={formatDim(inchesToUnit(MAX_SIZE_IN, unit))}
+                      value={shapeWidthIn !== null ? formatDim(inchesToUnit(shapeWidthIn, unit)) : ''}
+                      onChange={(e) => {
+                        const v = Math.max(0.25, Math.min(MAX_SIZE_IN, unitToInches(parseFloat(e.target.value) || 0.25, unit)));
+                        setShapeWidthIn(v);
+                      }}
+                      style={styles.numberInput} />
+                    <span style={styles.valueLabel}>{unitLabel}</span>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div style={styles.controlGroup}>
+              <h3 style={styles.groupTitle}>Outline / Border</h3>
+              <div style={styles.controlRow}>
+                <span style={styles.label}>Enable outline</span>
+                <ToggleSwitch checked={outlineEnabled} onChange={setOutlineEnabled} />
+              </div>
+              <div style={{ ...styles.controlRow, opacity: outlineEnabled ? 1 : 0.4 }}>
+                <span style={styles.label}>Color</span>
+                <input type="color" value={outlineColor} onChange={(e) => setOutlineColor(e.target.value)}
+                  disabled={!outlineEnabled} style={styles.colorInput} />
+              </div>
+              <div style={{ ...styles.controlRow, opacity: outlineEnabled ? 1 : 0.4 }}>
+                <span style={styles.label}>Thickness</span>
+                <input type="number" min={thicknessStep} max={thicknessMax} step={thicknessStep}
+                  value={outlineThickness} onChange={(e) => setOutlineThickness(parseFloat(e.target.value) || 0)}
+                  disabled={!outlineEnabled} style={styles.numberInput} />
+                <span style={styles.valueLabel}>{unitLabel}</span>
+              </div>
+            </div>
+
+            <div style={styles.controlGroup}>
+              <h3 style={styles.groupTitle}>Background Removal</h3>
+              <div style={styles.controlRow}>
+                <span style={styles.label}>Remove background</span>
+                <ToggleSwitch checked={bgRemovalEnabled} onChange={setBgRemovalEnabled} />
+              </div>
+              <p style={styles.hint}>Coming soon</p>
             </div>
           </div>
         </div>
@@ -453,8 +538,7 @@ const styles = {
     alignItems: 'center', justifyContent: 'center', zIndex: 1000,
   },
   modal: {
-    background: '#fff', borderRadius: 16,
-    boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+    background: '#fff', borderRadius: 16, boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
     maxWidth: 1200, width: '92vw', height: '90vh',
     overflow: 'hidden', display: 'flex', flexDirection: 'column',
   },
@@ -471,9 +555,7 @@ const styles = {
     padding: '1.5rem', display: 'flex', gap: '1.5rem',
     flex: 1, overflow: 'hidden', minHeight: 0,
   },
-  previewSection: {
-    flex: 3, display: 'flex', minWidth: 0, minHeight: 0,
-  },
+  previewSection: { flex: 3, display: 'flex', minWidth: 0, minHeight: 0 },
   rulerContainer: {
     position: 'relative', width: '100%', height: '100%',
     border: '1px solid #e0e0e0', borderRadius: 8, overflow: 'hidden',
@@ -494,24 +576,21 @@ const styles = {
     background: 'rgba(0,0,0,0.6)', color: '#fff', fontSize: '0.8rem',
     padding: '0.3rem 0.8rem', borderRadius: 6,
   },
-  controlsSection: {
-    flex: 1, minWidth: 220, maxWidth: 280, overflowY: 'auto',
+  errorOverlay: {
+    position: 'absolute', bottom: 12, left: '50%', transform: 'translateX(-50%)',
+    background: 'rgba(255,59,48,0.9)', color: '#fff', fontSize: '0.8rem',
+    padding: '0.3rem 0.8rem', borderRadius: 6, whiteSpace: 'nowrap',
   },
+  controlsSection: { flex: 1, minWidth: 220, maxWidth: 280, overflowY: 'auto' },
   controlGroup: { marginBottom: '1.25rem' },
   groupTitle: {
     fontSize: '0.8rem', fontWeight: 600, color: '#86868b',
     textTransform: 'uppercase', letterSpacing: '0.04em',
     margin: 0, marginBottom: '0.6rem',
   },
-  controlRow: {
-    display: 'flex', alignItems: 'center', gap: '0.75rem',
-    marginBottom: '0.5rem',
-  },
+  controlRow: { display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' },
   label: { fontSize: '0.9rem', color: '#1d1d1f', flex: 1 },
-  colorInput: {
-    width: 32, height: 32, border: 'none', borderRadius: 6,
-    cursor: 'pointer', padding: 0,
-  },
+  colorInput: { width: 32, height: 32, border: 'none', borderRadius: 6, cursor: 'pointer', padding: 0 },
   numberInput: {
     width: 64, padding: '0.3rem 0.4rem', fontSize: '0.85rem',
     border: '1px solid #d1d1d6', borderRadius: 6, textAlign: 'right',
@@ -531,12 +610,10 @@ const styles = {
   },
   cancelBtn: {
     padding: '0.5rem 1.25rem', fontSize: '0.9rem', fontWeight: 500,
-    background: '#f5f5f7', color: '#1d1d1f', border: 'none',
-    borderRadius: 8, cursor: 'pointer',
+    background: '#f5f5f7', color: '#1d1d1f', border: 'none', borderRadius: 8, cursor: 'pointer',
   },
   saveBtn: {
     padding: '0.5rem 1.25rem', fontSize: '0.9rem', fontWeight: 500,
-    background: '#007aff', color: '#fff', border: 'none',
-    borderRadius: 8, cursor: 'pointer',
+    background: '#007aff', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer',
   },
 };
