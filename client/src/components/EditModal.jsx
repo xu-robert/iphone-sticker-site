@@ -159,13 +159,14 @@ function StickerCanvas({ imageUrl, outlineEnabled, outlineColor, outlineThicknes
 }
 
 export default function EditModal({ sticker, onSave, onCancel }) {
-  const [outlineEnabled, setOutlineEnabled] = useState(false);
-  const [outlineColor, setOutlineColor] = useState('#ffffff');
-  const [outlineThickness, setOutlineThickness] = useState(0.04);
-  const [unit, setUnit] = useState('in');
-  const [stickerWidthIn, setStickerWidthIn] = useState(null);
-  const [bgRemovalEnabled, setBgRemovalEnabled] = useState(false);
-  const [cutType, setCutType] = useState('circle');
+  const prev = sticker.settings || {};
+  const [outlineEnabled, setOutlineEnabled] = useState(prev.outlineEnabled || false);
+  const [outlineColor, setOutlineColor] = useState(prev.outlineColor || '#ffffff');
+  const [outlineThickness, setOutlineThickness] = useState(prev.outlineThickness ?? 0.04);
+  const [unit, setUnit] = useState(prev.unit || 'in');
+  const [stickerWidthIn, setStickerWidthIn] = useState(prev.stickerWidthIn ?? null);
+  const [bgRemovalEnabled, setBgRemovalEnabled] = useState(prev.bgRemovalEnabled || false);
+  const [cutType, setCutType] = useState(prev.cutType || 'circle');
   const [stickerPos, setStickerPos] = useState({ x: 20, y: 20 });
   const workspaceRef = useRef(null);
   const draggingRef = useRef(false);

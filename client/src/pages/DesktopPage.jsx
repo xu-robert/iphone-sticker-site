@@ -90,7 +90,14 @@ export default function DesktopPage() {
   }, []);
 
   const handleEditSave = useCallback((sticker, settings) => {
-    console.log('Save sticker edit:', sticker.filename, settings);
+    setStickers((prev) => prev.map((s) => {
+      if (s.filename !== sticker.filename) return s;
+      return {
+        ...s,
+        displayUrl: settings.processedImageUrl || s.imageUrl,
+        settings,
+      };
+    }));
     setEditingSticker(null);
   }, []);
 

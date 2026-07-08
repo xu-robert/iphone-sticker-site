@@ -12,7 +12,7 @@ export default function StickerGrid({ stickers, onDelete, onEdit }) {
       {stickers.map((sticker) => (
         <div key={sticker.filename} style={styles.card}>
           <div style={styles.imageWrap}>
-            <img src={sticker.imageUrl} alt="Sticker" style={styles.image} />
+            <img src={sticker.displayUrl || sticker.imageUrl} alt="Sticker" style={styles.image} />
           </div>
           <div style={styles.footer}>
             <span style={styles.time}>{new Date(sticker.timestamp).toLocaleTimeString()}</span>
