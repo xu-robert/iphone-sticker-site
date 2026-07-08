@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { traceContour } from '../helpers/contourTracing.js';
+import { loadRMBGModel, runRMBG, applyAlphaToImage } from '../helpers/rmbgModel.js';
 
 const DEFAULT_SIZE_IN = 2;
 const MAX_SIZE_IN = 5;
@@ -101,27 +102,29 @@ function drawCutShapePath(ctx, cutType, w, h) {
   }
 }
 
-function useDraggable(initialPos, initialSizeIn, pxPerInch, aspectRatio, onPosChange, onSizeChange) {
+function useDraggable(initialPos, initialSizeIn, pxPerInch, aspectRatio, onPosChange, onSizeChange, onDragStart, onDragEnd) {
   const draggingRef = useRef(false);
 
   const handleMoveStart = useCallback((e) => {
     if (draggingRef.current) return;
     e.preventDefault();
     draggingRef.current = 'move';
+    onDragStart();
     const startX = e.clientX, startY = e.clientY;
     const startPos = { ...initialPos };
     function onMove(e) {
       if (draggingRef.current !== 'move') return;
       onPosChange({ x: startPos.x + (e.clientX - startX), y: startPos.y + (e.clientY - startY) });
     }
-    function onUp() { draggingRef.current = false; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); }
+    function onUp() { draggingRef.current = false; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); onDragEnd(); }
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [initialPos, onPosChange]);
+  }, [initialPos, onPosChange, onDragStart, onDragEnd]);
 
   const handleResizeStart = useCallback((e) => {
     e.preventDefault(); e.stopPropagation();
     draggingRef.current = 'resize';
+    onDragStart();
     const startX = e.clientX, startY = e.clientY;
     const startW = initialSizeIn;
     function onMove(e) {
@@ -132,26 +135,27 @@ function useDraggable(initialPos, initialSizeIn, pxPerInch, aspectRatio, onPosCh
       if (aspectRatio && newW / aspectRatio > MAX_SIZE_IN) newW = MAX_SIZE_IN * aspectRatio;
       onSizeChange(newW);
     }
-    function onUp() { draggingRef.current = false; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); }
+    function onUp() { draggingRef.current = false; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); onDragEnd(); }
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [initialSizeIn, pxPerInch, aspectRatio, onSizeChange]);
+  }, [initialSizeIn, pxPerInch, aspectRatio, onSizeChange, onDragStart, onDragEnd]);
 
   return { handleMoveStart, handleResizeStart };
 }
 
-function useContourTracing(compositeUrl, outlineEnabled, outlineThicknessPx) {
+function useContourTracing(compositeUrl, outlineEnabled, outlineOffsetPx, isDragging, targetW, targetH) {
   const [traceResult, setTraceResult] = useState(null);
   const [tracing, setTracing] = useState(false);
   useEffect(() => {
-    if (!outlineEnabled || !compositeUrl) { setTraceResult(null); return; }
+    if (isDragging) return;
+    if (!outlineEnabled || !compositeUrl || !targetW || !targetH) { setTraceResult(null); return; }
     let cancelled = false;
     setTracing(true);
-    traceContour(compositeUrl, outlineThicknessPx).then((result) => {
+    traceContour(compositeUrl, outlineOffsetPx, Math.round(targetW), Math.round(targetH)).then((result) => {
       if (!cancelled) { setTraceResult(result); setTracing(false); }
     }).catch(() => { if (!cancelled) { setTraceResult(null); setTracing(false); } });
     return () => { cancelled = true; };
-  }, [compositeUrl, outlineEnabled, outlineThicknessPx]);
+  }, [compositeUrl, outlineEnabled, outlineOffsetPx, isDragging, targetW, targetH]);
   return { traceResult, tracing };
 }
 
@@ -251,16 +255,25 @@ export default function EditModal({ sticker, onSave, onCancel }) {
   const [unit, setUnit] = useState(prev.unit || 'in');
   const [stickerWidthIn, setStickerWidthIn] = useState(prev.stickerWidthIn ?? null);
   const [bgRemovalEnabled, setBgRemovalEnabled] = useState(prev.bgRemovalEnabled || false);
+  const [bgRemovedUrl, setBgRemovedUrl] = useState(prev.bgRemovedUrl || null);
+  const [bgRemovalRunning, setBgRemovalRunning] = useState(false);
+  const [bgRemovalProgress, setBgRemovalProgress] = useState('');
   const [cutType, setCutType] = useState(prev.cutType || 'contour');
   const [cutBgColor, setCutBgColor] = useState(prev.cutBgColor || '#ffffff');
   const [shapeWidthIn, setShapeWidthIn] = useState(prev.shapeWidthIn ?? null);
 
   const [stickerPos, setStickerPos] = useState({ x: 40, y: 40 });
   const [shapePos, setShapePos] = useState({ x: 20, y: 20 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCountRef = useRef(0);
+
+  const onDragStart = useCallback(() => { dragCountRef.current++; setIsDragging(true); }, []);
+  const onDragEnd = useCallback(() => { dragCountRef.current--; if (dragCountRef.current <= 0) { dragCountRef.current = 0; setIsDragging(false); } }, []);
 
   const workspaceRef = useRef(null);
 
-  const img = useImageElement(sticker.imageUrl);
+  const activeImageUrl = bgRemovalEnabled && bgRemovedUrl ? bgRemovedUrl : sticker.imageUrl;
+  const img = useImageElement(activeImageUrl);
   const imageDims = img ? { width: img.width, height: img.height } : null;
   const stickerAspect = imageDims ? imageDims.width / imageDims.height : 1;
 
@@ -289,6 +302,7 @@ export default function EditModal({ sticker, onSave, onCancel }) {
   const pxPerInch = Math.min(workspaceSize.w, workspaceSize.h) / MAX_SIZE_IN;
   const effectiveDpi = imageDims && stickerWidthIn ? imageDims.width / stickerWidthIn : 300;
   const outlineThicknessPx = Math.max(1, Math.round(unitToInches(outlineThickness, unit) * effectiveDpi));
+  const outlineCanvasPx = Math.max(1, Math.round(unitToInches(outlineThickness, unit) * pxPerInch));
 
   const stickerPxW = stickerWidthIn ? stickerWidthIn * pxPerInch : 0;
   const stickerPxH = stickerHeightIn ? stickerHeightIn * pxPerInch : 0;
@@ -305,8 +319,10 @@ export default function EditModal({ sticker, onSave, onCancel }) {
     return buildCompositeDataUrl(img, cutType, cutBgColor, shapeWidthImgPx, shapeHeightImgPx, stickerOffsetXImgPx, stickerOffsetYImgPx);
   }, [img, cutType, cutBgColor, shapeWidthImgPx, shapeHeightImgPx, stickerOffsetXImgPx, stickerOffsetYImgPx]);
 
-  const traceUrl = cutType === 'contour' ? sticker.imageUrl : composite?.dataUrl;
-  const { traceResult, tracing } = useContourTracing(traceUrl, outlineEnabled, outlineThicknessPx);
+  const traceUrl = cutType === 'contour' ? activeImageUrl : composite?.dataUrl;
+  const traceTargetW = cutType === 'contour' ? stickerPxW : (composite ? composite.totalW * pxPerInch / effectiveDpi : 0);
+  const traceTargetH = cutType === 'contour' ? stickerPxH : (composite ? composite.totalH * pxPerInch / effectiveDpi : 0);
+  const { traceResult, tracing } = useContourTracing(traceUrl, outlineEnabled, outlineCanvasPx, isDragging, traceTargetW, traceTargetH);
 
   useEffect(() => {
     const handleKey = (e) => { if (e.key === 'Escape') onCancel(); };
@@ -315,8 +331,50 @@ export default function EditModal({ sticker, onSave, onCancel }) {
     return () => { document.removeEventListener('keydown', handleKey); document.body.style.overflow = ''; };
   }, [onCancel]);
 
-  const stickerDrag = useDraggable(stickerPos, stickerWidthIn, pxPerInch, stickerAspect, setStickerPos, setStickerWidthIn);
-  const shapeDrag = useDraggable(shapePos, shapeWidthIn, pxPerInch, shapeAspect, setShapePos, setShapeWidthIn);
+  const stickerDrag = useDraggable(stickerPos, stickerWidthIn, pxPerInch, stickerAspect, setStickerPos, setStickerWidthIn, onDragStart, onDragEnd);
+  const shapeDrag = useDraggable(shapePos, shapeWidthIn, pxPerInch, shapeAspect, setShapePos, setShapeWidthIn, onDragStart, onDragEnd);
+
+  const handleBgRemoval = useCallback(async () => {
+    if (bgRemovedUrl) {
+      setBgRemovalEnabled(true);
+      return;
+    }
+    setBgRemovalRunning(true);
+    setBgRemovalProgress('Loading model (~40 MB)...');
+    try {
+      const model = await loadRMBGModel();
+      setBgRemovalProgress('Running inference...');
+      const origImg = new Image();
+      origImg.crossOrigin = 'anonymous';
+      await new Promise((resolve, reject) => {
+        origImg.onload = resolve;
+        origImg.onerror = reject;
+        origImg.src = sticker.imageUrl;
+      });
+      const { alpha, width, height } = await runRMBG(model, origImg);
+      setBgRemovalProgress('Applying mask...');
+      const resultUrl = applyAlphaToImage(alpha, width, height, origImg);
+      if (resultUrl) {
+        setBgRemovedUrl(resultUrl);
+        setBgRemovalEnabled(true);
+      }
+    } catch (err) {
+      console.error('Background removal failed:', err);
+      setBgRemovalProgress('Failed: ' + err.message);
+      setTimeout(() => setBgRemovalProgress(''), 3000);
+    } finally {
+      setBgRemovalRunning(false);
+      setBgRemovalProgress('');
+    }
+  }, [sticker.imageUrl, bgRemovedUrl]);
+
+  const handleBgRemovalToggle = useCallback((checked) => {
+    if (checked && !bgRemovedUrl) {
+      handleBgRemoval();
+    } else {
+      setBgRemovalEnabled(checked);
+    }
+  }, [bgRemovedUrl, handleBgRemoval]);
 
   const handleWidthChange = (val) => {
     const wIn = Math.max(0.25, Math.min(MAX_SIZE_IN, unitToInches(parseFloat(val) || 0.25, unit)));
@@ -327,37 +385,51 @@ export default function EditModal({ sticker, onSave, onCancel }) {
     setStickerWidthIn(hIn * stickerAspect > MAX_SIZE_IN ? MAX_SIZE_IN : hIn * stickerAspect);
   };
 
+  function scaleSegments(segments, scale) {
+    return segments.map(s => ({
+      p0: { x: s.p0.x * scale, y: s.p0.y * scale },
+      cp1: { x: s.cp1.x * scale, y: s.cp1.y * scale },
+      cp2: { x: s.cp2.x * scale, y: s.cp2.y * scale },
+      p1: { x: s.p1.x * scale, y: s.p1.y * scale },
+    }));
+  }
+
   const handleSave = useCallback(() => {
     const displayW = formatDim(inchesToUnit(stickerWidthIn, unit));
     const displayH = formatDim(inchesToUnit(stickerHeightIn, unit));
     const settings = {
       outlineEnabled, outlineColor, outlineThickness, outlineThicknessPx,
       unit, stickerWidth: displayW, stickerHeight: displayH,
-      stickerWidthIn, stickerHeightIn, bgRemovalEnabled,
+      stickerWidthIn, stickerHeightIn, bgRemovalEnabled, bgRemovedUrl,
       cutType, cutBgColor, shapeWidthIn,
     };
     if (!img) { onSave(sticker, settings); return; }
 
+    const nativeScale = effectiveDpi / pxPerInch;
     let processedUrl;
     if (cutType === 'contour') {
       if (outlineEnabled && traceResult && traceResult.segments.length > 0) {
+        const nativeSegments = scaleSegments(traceResult.segments, nativeScale);
         const pad = outlineThicknessPx + 2;
         const c = document.createElement('canvas');
         c.width = img.width + pad * 2; c.height = img.height + pad * 2;
         const ctx = c.getContext('2d');
         ctx.save(); ctx.translate(pad, pad);
-        drawBezierPath(ctx, traceResult.segments);
+        drawBezierPath(ctx, nativeSegments);
         ctx.fillStyle = outlineColor; ctx.fill(); ctx.restore();
         ctx.drawImage(img, pad, pad);
         processedUrl = c.toDataURL('image/png');
       } else {
-        processedUrl = sticker.imageUrl;
+        processedUrl = activeImageUrl;
       }
     } else {
-      processedUrl = renderFinal(img, cutType, cutBgColor, shapeWidthImgPx, shapeHeightImgPx, stickerOffsetXImgPx, stickerOffsetYImgPx, outlineEnabled, outlineColor, outlineThicknessPx, traceResult);
+      const nativeTrace = outlineEnabled && traceResult && traceResult.segments.length > 0
+        ? { segments: scaleSegments(traceResult.segments, nativeScale), svgPath: '' }
+        : null;
+      processedUrl = renderFinal(img, cutType, cutBgColor, shapeWidthImgPx, shapeHeightImgPx, stickerOffsetXImgPx, stickerOffsetYImgPx, outlineEnabled, outlineColor, outlineThicknessPx, nativeTrace);
     }
     onSave(sticker, { ...settings, processedImageUrl: processedUrl });
-  }, [sticker, onSave, img, outlineEnabled, outlineColor, outlineThickness, outlineThicknessPx, unit, stickerWidthIn, stickerHeightIn, bgRemovalEnabled, cutType, cutBgColor, shapeWidthIn, shapeWidthImgPx, shapeHeightImgPx, stickerOffsetXImgPx, stickerOffsetYImgPx, traceResult]);
+  }, [sticker, onSave, img, outlineEnabled, outlineColor, outlineThickness, outlineThicknessPx, effectiveDpi, pxPerInch, unit, stickerWidthIn, stickerHeightIn, bgRemovalEnabled, bgRemovedUrl, activeImageUrl, cutType, cutBgColor, shapeWidthIn, shapeWidthImgPx, shapeHeightImgPx, stickerOffsetXImgPx, stickerOffsetYImgPx, traceResult]);
 
   const unitLabel = unit === 'cm' ? 'cm' : '"';
   const thicknessStep = unit === 'cm' ? 0.05 : 0.02;
@@ -388,22 +460,26 @@ export default function EditModal({ sticker, onSave, onCancel }) {
               <Ruler length={workspaceSize.h} pxPerInch={pxPerInch} unit={unit} vertical />
               <div ref={workspaceRef} style={styles.workspace}>
                 {/* Outline — rendered first so it's behind everything */}
-                {outlineEnabled && !outlineError && traceResult && traceResult.segments.length > 0 && (
-                  <svg
-                    style={{
-                      position: 'absolute', pointerEvents: 'none',
-                      left: (cutType === 'contour' ? stickerPos.x : Math.min(stickerPos.x, shapePos.x)) - (outlineThicknessPx + 2) * pxPerInch / effectiveDpi,
-                      top: (cutType === 'contour' ? stickerPos.y : Math.min(stickerPos.y, shapePos.y)) - (outlineThicknessPx + 2) * pxPerInch / effectiveDpi,
-                    }}
-                    width={(composite ? composite.totalW : img?.width || 0) * pxPerInch / effectiveDpi + (outlineThicknessPx + 2) * 2 * pxPerInch / effectiveDpi}
-                    height={(composite ? composite.totalH : img?.height || 0) * pxPerInch / effectiveDpi + (outlineThicknessPx + 2) * 2 * pxPerInch / effectiveDpi}
-                    viewBox={`0 0 ${(composite ? composite.totalW : img?.width || 0) + (outlineThicknessPx + 2) * 2} ${(composite ? composite.totalH : img?.height || 0) + (outlineThicknessPx + 2) * 2}`}
-                  >
-                    <g transform={`translate(${outlineThicknessPx + 2},${outlineThicknessPx + 2})`}>
-                      <path d={traceResult.svgPath} fill={outlineColor} />
-                    </g>
-                  </svg>
-                )}
+                {outlineEnabled && !outlineError && traceResult && traceResult.segments.length > 0 && (() => {
+                  const pad = outlineCanvasPx + 2;
+                  const baseX = cutType === 'contour' ? stickerPos.x : Math.min(stickerPos.x, shapePos.x);
+                  const baseY = cutType === 'contour' ? stickerPos.y : Math.min(stickerPos.y, shapePos.y);
+                  const contentW = cutType === 'contour' ? stickerPxW : traceTargetW;
+                  const contentH = cutType === 'contour' ? stickerPxH : traceTargetH;
+                  const svgW = contentW + pad * 2;
+                  const svgH = contentH + pad * 2;
+                  return (
+                    <svg
+                      style={{ position: 'absolute', pointerEvents: 'none', left: baseX - pad, top: baseY - pad }}
+                      width={svgW} height={svgH}
+                      viewBox={`0 0 ${svgW} ${svgH}`}
+                    >
+                      <g transform={`translate(${pad},${pad})`}>
+                        <path d={traceResult.svgPath} fill={outlineColor} />
+                      </g>
+                    </svg>
+                  );
+                })()}
 
                 {/* Cut shape */}
                 {showCutOptions && shapeWidthIn !== null && (
@@ -421,7 +497,7 @@ export default function EditModal({ sticker, onSave, onCancel }) {
                 {stickerWidthIn !== null && img && (
                   <DraggableObject pos={stickerPos} widthPx={stickerPxW} heightPx={stickerPxH}
                     onMoveStart={stickerDrag.handleMoveStart} onResizeStart={stickerDrag.handleResizeStart} selected={false}>
-                    <img src={sticker.imageUrl} alt="Sticker" style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} />
+                    <img src={activeImageUrl} alt="Sticker" style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} />
                   </DraggableObject>
                 )}
 
@@ -515,9 +591,14 @@ export default function EditModal({ sticker, onSave, onCancel }) {
               <h3 style={styles.groupTitle}>Background Removal</h3>
               <div style={styles.controlRow}>
                 <span style={styles.label}>Remove background</span>
-                <ToggleSwitch checked={bgRemovalEnabled} onChange={setBgRemovalEnabled} />
+                <ToggleSwitch checked={bgRemovalEnabled} onChange={handleBgRemovalToggle} disabled={bgRemovalRunning} />
               </div>
-              <p style={styles.hint}>Coming soon</p>
+              {bgRemovalRunning && (
+                <p style={styles.hint}>{bgRemovalProgress}</p>
+              )}
+              {bgRemovedUrl && !bgRemovalRunning && (
+                <p style={styles.hint}>Background removed{bgRemovalEnabled ? '' : ' (disabled)'}</p>
+              )}
             </div>
           </div>
         </div>

@@ -2,3 +2,5 @@ node_modules/
 server/uploads/
 client/dist/
 .env
+client/public/models/*.onnx
+client/public/*.wasm

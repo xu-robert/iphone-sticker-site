@@ -1,8 +1,8 @@
 import Potrace from 'potrace/lib/Potrace';
 import Bitmap from 'potrace/lib/types/Bitmap';
 
-export async function traceContour(imageDataUrl, offsetPx = 10) {
-  const { data: alpha, w, h } = await decodeAlpha(imageDataUrl);
+export async function traceContour(imageDataUrl, offsetPx = 10, targetW, targetH) {
+  const { data: alpha, w, h } = await decodeAlpha(imageDataUrl, targetW, targetH);
   return traceFromAlpha(alpha, w, h, offsetPx);
 }
 
@@ -52,21 +52,23 @@ export function traceFromAlpha(alpha, w, h, offsetPx = 10) {
   return { svgPath, segments };
 }
 
-function decodeAlpha(dataUrl) {
+function decodeAlpha(dataUrl, targetW, targetH) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
+      const w = targetW || img.width;
+      const h = targetH || img.height;
       const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
+      canvas.width = w;
+      canvas.height = h;
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      const imageData = ctx.getImageData(0, 0, img.width, img.height);
-      const alpha = new Uint8Array(img.width * img.height);
+      ctx.drawImage(img, 0, 0, w, h);
+      const imageData = ctx.getImageData(0, 0, w, h);
+      const alpha = new Uint8Array(w * h);
       for (let i = 0; i < alpha.length; i++) {
         alpha[i] = imageData.data[i * 4 + 3];
       }
-      resolve({ data: alpha, w: img.width, h: img.height });
+      resolve({ data: alpha, w, h });
     };
     img.onerror = reject;
     img.src = dataUrl;
