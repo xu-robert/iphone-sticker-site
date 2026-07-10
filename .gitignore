@@ -4,3 +4,5 @@ client/dist/
 .env
 client/public/models/*.onnx
 client/public/*.wasm
+server/data/
+server/orders-assets/

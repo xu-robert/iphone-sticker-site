@@ -1,4 +1,4 @@
-export default function StickerGrid({ stickers, onDelete, onEdit }) {
+export default function StickerGrid({ stickers, onDelete, onEdit, onOrder }) {
   if (stickers.length === 0) {
     return (
       <div style={styles.empty}>
@@ -17,6 +17,7 @@ export default function StickerGrid({ stickers, onDelete, onEdit }) {
           <div style={styles.footer}>
             <span style={styles.time}>{new Date(sticker.timestamp).toLocaleTimeString()}</span>
             <div style={styles.actions}>
+              <button onClick={() => onOrder(sticker)} style={styles.orderBtn}>Order</button>
               <button onClick={() => onEdit(sticker)} style={styles.editBtn}>Edit</button>
               <button onClick={() => onDelete(sticker.filename)} style={styles.deleteBtn}>Delete</button>
             </div>
@@ -71,6 +72,14 @@ const styles = {
   editBtn: {
     fontSize: '0.75rem',
     color: '#007aff',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontWeight: 500,
+  },
+  orderBtn: {
+    fontSize: '0.75rem',
+    color: '#34c759',
     background: 'none',
     border: 'none',
     cursor: 'pointer',

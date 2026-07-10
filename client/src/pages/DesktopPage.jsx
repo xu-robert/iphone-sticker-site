@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import StickerGrid from '../components/StickerGrid.jsx';
 import EditModal from '../components/EditModal.jsx';
+import AddToCartModal from '../components/AddToCartModal.jsx';
+import CartBadge from '../components/CartBadge.jsx';
 import ConnectionStatus from '../components/ConnectionStatus.jsx';
 import { useWebSocket } from '../hooks/useWebSocket.js';
 
@@ -12,6 +14,7 @@ export default function DesktopPage() {
   const [lanHost, setLanHost] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editingSticker, setEditingSticker] = useState(null);
+  const [orderingSticker, setOrderingSticker] = useState(null);
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -89,6 +92,10 @@ export default function DesktopPage() {
     setEditingSticker(sticker);
   }, []);
 
+  const handleOrder = useCallback((sticker) => {
+    setOrderingSticker(sticker);
+  }, []);
+
   const handleEditSave = useCallback((sticker, settings) => {
     setStickers((prev) => prev.map((s) => {
       if (s.filename !== sticker.filename) return s;
@@ -122,7 +129,10 @@ export default function DesktopPage() {
     <>
       <header style={styles.header}>
         <h1 style={styles.title}>Sticker Grab</h1>
-        <ConnectionStatus status={status} phoneConnected={phoneConnected} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <ConnectionStatus status={status} phoneConnected={phoneConnected} />
+          <CartBadge />
+        </div>
       </header>
 
       <div style={styles.qrCard}>
@@ -157,13 +167,20 @@ export default function DesktopPage() {
         <span style={styles.uploadHint}>Max 20 MB per file</span>
       </div>
 
-      <StickerGrid stickers={stickers} onDelete={handleDelete} onEdit={handleEdit} />
+      <StickerGrid stickers={stickers} onDelete={handleDelete} onEdit={handleEdit} onOrder={handleOrder} />
 
       {editingSticker && (
         <EditModal
           sticker={editingSticker}
           onSave={handleEditSave}
           onCancel={handleEditCancel}
+        />
+      )}
+
+      {orderingSticker && (
+        <AddToCartModal
+          sticker={orderingSticker}
+          onClose={() => setOrderingSticker(null)}
         />
       )}
     </>

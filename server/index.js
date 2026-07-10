@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
@@ -7,14 +8,38 @@ import fs from 'fs';
 import crypto from 'crypto';
 import os from 'os';
 import sharp from 'sharp';
+import Stripe from 'stripe';
 import { createSession, getSession, addSticker, removeSticker } from './sessions.js';
+import { createOrder, createOrderItem, updateOrderStripeSession, markOrderPaid, getOrderByReference, getOrderByReferenceAndEmail } from './db.js';
+import { SIZES, SHIPPING_FLAT_CENTS, getSize } from './pricing.js';
+
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 
 const PORT = process.env.PORT || 3001;
 const UPLOADS_DIR = path.join(import.meta.dirname, 'uploads');
+const ORDERS_ASSETS_DIR = path.join(import.meta.dirname, 'orders-assets');
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+fs.mkdirSync(ORDERS_ASSETS_DIR, { recursive: true });
 
 const app = express();
 const server = createServer(app);
+
+// Stripe webhook must be registered before express.json() — needs raw body
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  if (!stripe) return res.status(500).json({ error: 'Stripe not configured' });
+  const sig = req.headers['stripe-signature'];
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    return res.status(400).json({ error: `Webhook signature verification failed` });
+  }
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    markOrderPaid(session.id, session.payment_intent);
+  }
+  res.json({ received: true });
+});
 
 // --- WebSocket ---
 
@@ -162,6 +187,109 @@ app.delete('/api/session/:id/sticker/:filename', (req, res) => {
 });
 
 app.use('/uploads', express.static(UPLOADS_DIR));
+app.use('/orders-assets', express.static(ORDERS_ASSETS_DIR));
+
+// --- Orders / E-Commerce ---
+
+app.get('/api/pricing', (req, res) => {
+  res.json({ sizes: SIZES, shippingCents: SHIPPING_FLAT_CENTS });
+});
+
+app.post('/api/cart/finalize-image', express.json({ limit: '20mb' }), (req, res) => {
+  const { dataUrl } = req.body;
+  if (!dataUrl || !dataUrl.startsWith('data:image/')) {
+    return res.status(400).json({ error: 'Invalid image data' });
+  }
+  const matches = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/);
+  if (!matches) return res.status(400).json({ error: 'Invalid data URL format' });
+  const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+  const buffer = Buffer.from(matches[2], 'base64');
+  const filename = `${crypto.randomUUID()}.${ext}`;
+  fs.writeFileSync(path.join(ORDERS_ASSETS_DIR, filename), buffer);
+  res.json({ imageUrl: `/orders-assets/${filename}` });
+});
+
+app.post('/api/checkout', async (req, res) => {
+  if (!stripe) return res.status(500).json({ error: 'Stripe not configured' });
+  const { items, shipping } = req.body;
+  if (!items?.length || !shipping?.email || !shipping?.name || !shipping?.line1 || !shipping?.city || !shipping?.state || !shipping?.zip) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  let subtotalCents = 0;
+  const validatedItems = [];
+  for (const item of items) {
+    const size = getSize(item.sizeValue);
+    if (!size) return res.status(400).json({ error: `Invalid size: ${item.sizeValue}` });
+    const qty = Math.max(1, Math.floor(item.quantity));
+    subtotalCents += size.priceCents * qty;
+    validatedItems.push({ ...size, quantity: qty, imageUrl: item.imageUrl });
+  }
+
+  const totalCents = subtotalCents + SHIPPING_FLAT_CENTS;
+  const order = createOrder({
+    email: shipping.email, name: shipping.name,
+    line1: shipping.line1, line2: shipping.line2,
+    city: shipping.city, state: shipping.state, zip: shipping.zip,
+    country: shipping.country || 'US',
+    subtotalCents, shippingCents: SHIPPING_FLAT_CENTS, totalCents,
+  });
+
+  for (const item of validatedItems) {
+    createOrderItem(order.id, item);
+  }
+
+  const origin = `${req.protocol}://${req.get('host')}`;
+  const line_items = validatedItems.map(item => ({
+    price_data: {
+      currency: 'usd',
+      product_data: {
+        name: `Custom Sticker - ${item.label}`,
+        images: item.imageUrl.startsWith('/') ? [`${origin}${item.imageUrl}`] : [item.imageUrl],
+      },
+      unit_amount: item.priceCents,
+    },
+    quantity: item.quantity,
+  }));
+  line_items.push({
+    price_data: {
+      currency: 'usd',
+      product_data: { name: 'Shipping (Flat Rate)' },
+      unit_amount: SHIPPING_FLAT_CENTS,
+    },
+    quantity: 1,
+  });
+
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      line_items,
+      customer_email: shipping.email,
+      success_url: `${origin}/order/${order.reference}`,
+      cancel_url: `${origin}/cart`,
+      metadata: { order_reference: order.reference },
+    });
+    updateOrderStripeSession(order.reference, session.id);
+    res.json({ checkoutUrl: session.url });
+  } catch (err) {
+    console.error('Stripe checkout error:', err);
+    res.status(500).json({ error: 'Failed to create checkout session' });
+  }
+});
+
+app.get('/api/order/:reference', (req, res) => {
+  const order = getOrderByReference(req.params.reference);
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  res.json(order);
+});
+
+app.post('/api/order/lookup', (req, res) => {
+  const { reference, email } = req.body;
+  if (!reference || !email) return res.status(400).json({ error: 'Reference and email required' });
+  const order = getOrderByReferenceAndEmail(reference.toUpperCase(), email.toLowerCase());
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  res.json(order);
+});
 
 // --- Static / SPA ---
 
