@@ -42,10 +42,11 @@ export default function CartPage() {
   if (items.length === 0) {
     return (
       <div style={styles.page}>
-        <h1 style={styles.pageTitle}>Your Cart</h1>
-        <div style={styles.empty}>
-          <p style={styles.emptyText}>Your cart is empty.</p>
-          <Link to="/" style={styles.backLink}>Continue editing stickers</Link>
+        <div style={styles.emptyState}>
+          <div style={styles.emptyIcon}>🛒</div>
+          <h1 style={styles.emptyTitle}>Your cart is empty</h1>
+          <p style={styles.emptyText}>Add some stickers to get started!</p>
+          <Link to="/workspace" style={styles.startLink}>Start Creating</Link>
         </div>
       </div>
     );
@@ -55,7 +56,7 @@ export default function CartPage() {
     <div style={styles.page}>
       <div style={styles.headerRow}>
         <h1 style={styles.pageTitle}>Your Cart</h1>
-        <Link to="/" style={styles.backLink}>Continue Editing</Link>
+        <Link to="/workspace" style={styles.backLink}>← Continue Editing</Link>
       </div>
 
       <div style={styles.layout}>
@@ -132,72 +133,80 @@ export default function CartPage() {
 }
 
 const styles = {
-  page: { maxWidth: 1000, margin: '0 auto', padding: '2rem 1.5rem' },
+  page: { maxWidth: 1000, margin: '0 auto', padding: '1.5rem' },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' },
   pageTitle: { fontSize: '1.5rem', fontWeight: 700, margin: 0 },
-  backLink: { fontSize: '0.9rem', color: '#007aff', textDecoration: 'none', fontWeight: 500 },
-  empty: { textAlign: 'center', padding: '4rem 0' },
-  emptyText: { color: '#86868b', fontSize: '1.05rem', marginBottom: '1rem' },
+  backLink: { fontSize: '0.9rem', color: 'var(--brand-purple)', textDecoration: 'none', fontWeight: 500 },
+  emptyState: { textAlign: 'center', padding: '5rem 2rem' },
+  emptyIcon: { fontSize: '3rem', marginBottom: '1rem' },
+  emptyTitle: { fontSize: '1.3rem', fontWeight: 700, marginBottom: '0.4rem' },
+  emptyText: { color: 'var(--text-muted)', marginBottom: '1.5rem' },
+  startLink: {
+    display: 'inline-flex', padding: '0.7rem 1.5rem', fontSize: '0.95rem', fontWeight: 600,
+    color: '#fff', background: 'var(--gradient-btn)', borderRadius: 'var(--radius-md)',
+    textDecoration: 'none', boxShadow: 'var(--shadow-glow)',
+  },
   layout: { display: 'flex', gap: '2rem', alignItems: 'flex-start', flexWrap: 'wrap' },
   itemsSection: { flex: 2, minWidth: 300 },
   sidebar: { flex: 1, minWidth: 280 },
   itemCard: {
-    display: 'flex', gap: '1rem', padding: '1rem', background: '#fff',
-    borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.06)', marginBottom: '1rem',
+    display: 'flex', gap: '1rem', padding: '1rem', background: 'var(--bg-card)',
+    borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-sm)',
+    border: '1px solid var(--border-light)', marginBottom: '0.75rem',
   },
   itemPreview: {
     width: 80, height: 80, flexShrink: 0, display: 'flex',
     alignItems: 'center', justifyContent: 'center',
-    background: 'repeating-conic-gradient(#e8e8e8 0% 25%, #fff 0% 50%) 0 0 / 12px 12px',
-    borderRadius: 8,
+    background: 'repeating-conic-gradient(#f0f0f0 0% 25%, #fff 0% 50%) 0 0 / 12px 12px',
+    borderRadius: 'var(--radius-sm)',
   },
   itemImg: { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' },
   itemDetails: { flex: 1, display: 'flex', flexDirection: 'column', gap: '0.5rem' },
   itemRow: { display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' },
-  itemLabel: { fontSize: '0.8rem', color: '#86868b', minWidth: 30 },
+  itemLabel: { fontSize: '0.8rem', color: 'var(--text-muted)', minWidth: 30 },
   itemPrice: { fontSize: '0.95rem', fontWeight: 600, marginLeft: 'auto' },
   removeBtn: {
-    fontSize: '0.75rem', color: '#ff3b30', background: 'none',
+    fontSize: '0.75rem', color: '#ef4444', background: 'none',
     border: 'none', cursor: 'pointer', fontWeight: 500,
   },
   chipRow: { display: 'flex', gap: '0.3rem' },
   chip: {
-    padding: '0.25rem 0.5rem', borderRadius: 6, fontSize: '0.7rem',
-    fontWeight: 500, cursor: 'pointer', border: '1.5px solid #d1d1d6',
-    background: '#fff', color: '#1d1d1f',
+    padding: '0.25rem 0.55rem', borderRadius: 'var(--radius-sm)', fontSize: '0.7rem',
+    fontWeight: 500, cursor: 'pointer', border: '1.5px solid var(--border)',
+    background: 'var(--bg-card)', color: 'var(--text)',
   },
-  chipActive: { borderColor: '#007aff', background: '#eef4ff', color: '#007aff' },
+  chipActive: { borderColor: 'var(--brand-purple)', background: 'rgba(124,58,237,0.06)', color: 'var(--brand-purple)' },
   qtyInput: {
     width: 56, padding: '0.3rem', fontSize: '0.85rem',
-    border: '1px solid #d1d1d6', borderRadius: 6, textAlign: 'center',
+    border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', textAlign: 'center',
   },
   summaryCard: {
-    background: '#fff', borderRadius: 12, padding: '1.25rem',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.06)', marginBottom: '1rem',
+    background: 'var(--bg-card)', borderRadius: 'var(--radius-md)', padding: '1.25rem',
+    boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border-light)', marginBottom: '0.75rem',
   },
   shippingCard: {
-    background: '#fff', borderRadius: 12, padding: '1.25rem',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.06)', marginBottom: '1rem',
+    background: 'var(--bg-card)', borderRadius: 'var(--radius-md)', padding: '1.25rem',
+    boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border-light)', marginBottom: '0.75rem',
   },
   sidebarTitle: { fontSize: '1rem', fontWeight: 600, margin: '0 0 1rem' },
   summaryRow: {
     display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem',
-    color: '#1d1d1f', marginBottom: '0.5rem',
+    color: 'var(--text)', marginBottom: '0.5rem',
   },
   totalRow: {
-    borderTop: '1px solid #f0f0f0', paddingTop: '0.5rem', marginTop: '0.25rem',
-    fontWeight: 700, fontSize: '1rem',
+    borderTop: '1px solid var(--border-light)', paddingTop: '0.5rem', marginTop: '0.25rem',
+    fontWeight: 700, fontSize: '1.05rem',
   },
   input: {
-    width: '100%', padding: '0.5rem 0.7rem', fontSize: '0.9rem',
-    border: '1px solid #d1d1d6', borderRadius: 8, marginBottom: '0.5rem',
-    boxSizing: 'border-box',
+    width: '100%', padding: '0.55rem 0.75rem', fontSize: '0.9rem',
+    border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', marginBottom: '0.5rem',
+    boxSizing: 'border-box', outline: 'none',
   },
   inputRow: { display: 'flex', gap: '0.5rem' },
-  error: { color: '#ff3b30', fontSize: '0.85rem', marginBottom: '0.5rem' },
+  error: { color: '#ef4444', fontSize: '0.85rem', marginBottom: '0.5rem' },
   checkoutBtn: {
-    width: '100%', padding: '0.75rem', fontSize: '1rem', fontWeight: 600,
-    background: '#007aff', color: '#fff', border: 'none', borderRadius: 10,
-    cursor: 'pointer',
+    width: '100%', padding: '0.8rem', fontSize: '1rem', fontWeight: 600,
+    color: '#fff', background: 'var(--gradient-btn)', border: 'none',
+    borderRadius: 'var(--radius-md)', cursor: 'pointer', boxShadow: 'var(--shadow-glow)',
   },
 };

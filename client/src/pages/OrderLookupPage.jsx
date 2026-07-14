@@ -38,14 +38,15 @@ export default function OrderLookupPage() {
   }[order.status] || order.status) : '';
 
   const statusColor = order ? (
-    order.status === 'paid' || order.status === 'shipped' ? '#34c759'
-    : order.status === 'cancelled' ? '#ff3b30' : '#ff9500'
+    order.status === 'paid' || order.status === 'shipped' ? '#10b981'
+    : order.status === 'cancelled' ? '#ef4444' : '#f97316'
   ) : '';
 
   return (
     <div style={styles.page}>
       <div style={styles.card}>
-        <h1 style={styles.title}>Order Lookup</h1>
+        <div style={styles.icon}>📦</div>
+        <h1 style={styles.title}>Track Your Order</h1>
         <p style={styles.subtitle}>Enter your reference number and email to check your order status.</p>
 
         <form onSubmit={handleLookup} style={styles.form}>
@@ -93,7 +94,7 @@ export default function OrderLookupPage() {
           </div>
         )}
 
-        <Link to="/" style={styles.link}>Back to Home</Link>
+        <Link to="/" style={styles.link}>← Back to Home</Link>
       </div>
     </div>
   );
@@ -102,45 +103,47 @@ export default function OrderLookupPage() {
 const styles = {
   page: { maxWidth: 480, margin: '0 auto', padding: '2rem 1.5rem' },
   card: {
-    background: '#fff', borderRadius: 16, padding: '2rem',
-    boxShadow: '0 2px 12px rgba(0,0,0,0.06)', textAlign: 'center',
+    background: 'var(--bg-card)', borderRadius: 'var(--radius-xl)', padding: '2.5rem 2rem',
+    boxShadow: 'var(--shadow-md)', border: '1px solid var(--border-light)', textAlign: 'center',
   },
-  title: { fontSize: '1.5rem', fontWeight: 700, margin: '0 0 0.25rem' },
-  subtitle: { color: '#86868b', fontSize: '0.9rem', margin: '0 0 1.5rem' },
+  icon: { fontSize: '2.5rem', marginBottom: '0.75rem' },
+  title: { fontSize: '1.4rem', fontWeight: 700, margin: '0 0 0.3rem' },
+  subtitle: { color: 'var(--text-muted)', fontSize: '0.9rem', margin: '0 0 1.5rem', lineHeight: 1.5 },
   form: { textAlign: 'left', marginBottom: '1.5rem' },
   input: {
     width: '100%', padding: '0.6rem 0.8rem', fontSize: '0.95rem',
-    border: '1px solid #d1d1d6', borderRadius: 8, marginBottom: '0.6rem',
-    boxSizing: 'border-box',
+    border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', marginBottom: '0.6rem',
+    boxSizing: 'border-box', outline: 'none',
   },
-  error: { color: '#ff3b30', fontSize: '0.85rem', margin: '0 0 0.5rem' },
+  error: { color: '#ef4444', fontSize: '0.85rem', margin: '0 0 0.5rem' },
   lookupBtn: {
-    width: '100%', padding: '0.65rem', fontSize: '0.95rem', fontWeight: 600,
-    background: '#007aff', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer',
+    width: '100%', padding: '0.7rem', fontSize: '0.95rem', fontWeight: 600,
+    color: '#fff', background: 'var(--gradient-btn)', border: 'none',
+    borderRadius: 'var(--radius-sm)', cursor: 'pointer', boxShadow: 'var(--shadow-glow)',
   },
   result: {
-    textAlign: 'left', borderTop: '1px solid #f0f0f0', paddingTop: '1.25rem', marginBottom: '1.25rem',
+    textAlign: 'left', borderTop: '1px solid var(--border-light)', paddingTop: '1.25rem', marginBottom: '1.25rem',
   },
   resultHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem',
   },
-  refValue: { fontSize: '1.1rem', fontWeight: 700, fontFamily: 'monospace' },
+  refValue: { fontSize: '1.1rem', fontWeight: 700, fontFamily: 'var(--font-mono)' },
   statusBadge: {
     display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
     fontSize: '0.8rem', fontWeight: 500,
   },
   statusDot: { width: 8, height: 8, borderRadius: '50%' },
   section: { marginBottom: '1rem' },
-  sectionTitle: { fontSize: '0.75rem', fontWeight: 600, color: '#86868b', textTransform: 'uppercase', margin: '0 0 0.5rem' },
+  sectionTitle: { fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 0.5rem' },
   itemRow: { display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem', fontSize: '0.9rem' },
   itemThumb: {
-    width: 40, height: 40, flexShrink: 0, borderRadius: 6,
-    background: 'repeating-conic-gradient(#e8e8e8 0% 25%, #fff 0% 50%) 0 0 / 8px 8px',
+    width: 40, height: 40, flexShrink: 0, borderRadius: 'var(--radius-sm)',
+    background: 'repeating-conic-gradient(#f0f0f0 0% 25%, #fff 0% 50%) 0 0 / 8px 8px',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
   itemImg: { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' },
   itemPrice: { marginLeft: 'auto', fontWeight: 600 },
   totalRow: { display: 'flex', justifyContent: 'space-between', fontSize: '1rem', marginBottom: '0.5rem' },
-  paidAt: { fontSize: '0.8rem', color: '#86868b', margin: 0 },
-  link: { color: '#007aff', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 },
+  paidAt: { fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 },
+  link: { color: 'var(--brand-purple)', textDecoration: 'none', fontSize: '0.9rem', fontWeight: 500 },
 };

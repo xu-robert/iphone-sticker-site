@@ -3,7 +3,6 @@ import { QRCodeSVG } from 'qrcode.react';
 import StickerGrid from '../components/StickerGrid.jsx';
 import EditModal from '../components/EditModal.jsx';
 import AddToCartModal from '../components/AddToCartModal.jsx';
-import CartBadge from '../components/CartBadge.jsx';
 import ConnectionStatus from '../components/ConnectionStatus.jsx';
 import { useWebSocket } from '../hooks/useWebSocket.js';
 
@@ -15,6 +14,7 @@ export default function DesktopPage() {
   const [loading, setLoading] = useState(true);
   const [editingSticker, setEditingSticker] = useState(null);
   const [orderingSticker, setOrderingSticker] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -72,10 +72,9 @@ export default function DesktopPage() {
     setStickers((prev) => prev.filter((s) => s.filename !== filename));
   }, [sessionId]);
 
-  const handleFileUpload = useCallback(async (e) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  const uploadFiles = useCallback(async (files) => {
     for (const file of files) {
+      if (!file.type.startsWith('image/')) continue;
       const form = new FormData();
       form.append('sticker', file, file.name);
       try {
@@ -85,8 +84,21 @@ export default function DesktopPage() {
         console.error('Upload failed:', err);
       }
     }
-    e.target.value = '';
   }, [sessionId]);
+
+  const handleFileUpload = useCallback(async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    await uploadFiles(files);
+    e.target.value = '';
+  }, [uploadFiles]);
+
+  const handleDrop = useCallback(async (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const files = e.dataTransfer.files;
+    if (files.length > 0) await uploadFiles(files);
+  }, [uploadFiles]);
 
   const handleEdit = useCallback((sticker) => {
     setEditingSticker(sticker);
@@ -126,45 +138,45 @@ export default function DesktopPage() {
     : `${window.location.origin}/phone/${sessionId}`;
 
   return (
-    <>
-      <header style={styles.header}>
-        <h1 style={styles.title}>Sticker Grab</h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <ConnectionStatus status={status} phoneConnected={phoneConnected} />
-          <CartBadge />
-        </div>
-      </header>
-
-      <div style={styles.qrCard}>
-        <div style={styles.qrLeft}>
-          <QRCodeSVG value={phoneUrl} size={180} level="M" />
-        </div>
-        <div style={styles.qrRight}>
-          <h2 style={styles.qrHeading}>Scan with your iPhone</h2>
-          <p style={styles.qrInstructions}>
-            Open the camera app on your phone and scan this QR code.
-            Then paste stickers into the input field — they'll appear here instantly.
-          </p>
-          <div style={styles.urlRow}>
-            <code style={styles.urlCode}>{phoneUrl}</code>
-          </div>
-          <button onClick={handleNewSession} style={styles.newSessionBtn}>New Session</button>
-        </div>
+    <div style={styles.page}>
+      <div style={styles.topRow}>
+        <ConnectionStatus status={status} phoneConnected={phoneConnected} />
+        <button onClick={handleNewSession} style={styles.newSessionBtn}>New Session</button>
       </div>
 
-      <div style={styles.uploadRow}>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          multiple
-          onChange={handleFileUpload}
-          style={{ display: 'none' }}
-        />
-        <button onClick={() => fileRef.current?.click()} style={styles.uploadBtn}>
-          Upload from Computer
-        </button>
-        <span style={styles.uploadHint}>Max 20 MB per file</span>
+      <div style={styles.twoCol}>
+        <div style={styles.qrCard}>
+          <QRCodeSVG value={phoneUrl} size={140} level="M"
+            bgColor="transparent" fgColor="#1a1a2e" />
+          <div style={styles.qrInfo}>
+            <h2 style={styles.qrHeading}>Scan to send stickers</h2>
+            <p style={styles.qrSub}>
+              Open your phone camera and scan this code.
+              Paste stickers and they appear here instantly.
+            </p>
+            <code style={styles.urlCode}>{phoneUrl}</code>
+          </div>
+        </div>
+
+        <div
+          style={{ ...styles.uploadCard, ...(dragOver ? styles.uploadCardDragOver : {}) }}
+          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+          onClick={() => fileRef.current?.click()}
+        >
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleFileUpload}
+            style={{ display: 'none' }}
+          />
+          <div style={styles.uploadIcon}>+</div>
+          <p style={styles.uploadText}>Drop images here or click to upload</p>
+          <p style={styles.uploadHint}>PNG, JPG, SVG up to 20 MB</p>
+        </div>
       </div>
 
       <StickerGrid stickers={stickers} onDelete={handleDelete} onEdit={handleEdit} onOrder={handleOrder} />
@@ -183,37 +195,108 @@ export default function DesktopPage() {
           onClose={() => setOrderingSticker(null)}
         />
       )}
-    </>
+    </div>
   );
 }
 
 const styles = {
-  header: {
-    display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem',
+  page: {
+    maxWidth: 960,
+    margin: '0 auto',
+    padding: '1.5rem',
   },
-  title: { fontSize: '1.5rem', fontWeight: 700 },
-  qrCard: {
-    display: 'flex', gap: '2rem', padding: '2rem', background: '#fff',
-    borderRadius: 16, boxShadow: '0 2px 12px rgba(0,0,0,0.06)', marginBottom: '2rem',
-    alignItems: 'center', flexWrap: 'wrap',
-  },
-  qrLeft: { flexShrink: 0 },
-  qrRight: { flex: 1, minWidth: 200 },
-  qrHeading: { fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem' },
-  qrInstructions: { color: '#6e6e73', lineHeight: 1.5, marginBottom: '1rem' },
-  urlRow: { marginBottom: '0.75rem' },
-  urlCode: {
-    fontSize: '0.8rem', color: '#86868b', background: '#f5f5f7',
-    padding: '0.35rem 0.6rem', borderRadius: 6, wordBreak: 'break-all',
+  topRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '1.25rem',
   },
   newSessionBtn: {
-    fontSize: '0.8rem', color: '#007aff', background: 'none',
-    border: 'none', cursor: 'pointer', padding: 0, fontWeight: 500,
+    fontSize: '0.8rem',
+    color: 'var(--text-muted)',
+    background: 'none',
+    border: '1px solid var(--border)',
+    borderRadius: 'var(--radius-sm)',
+    padding: '0.35rem 0.75rem',
+    cursor: 'pointer',
+    fontWeight: 500,
   },
-  uploadRow: { marginBottom: '1.5rem' },
-  uploadBtn: {
-    padding: '0.6rem 1.25rem', fontSize: '0.9rem', fontWeight: 500,
-    background: '#007aff', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer',
+  twoCol: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '1rem',
+    marginBottom: '2rem',
   },
-  uploadHint: { fontSize: '0.8rem', color: '#86868b', marginLeft: '0.75rem' },
+  qrCard: {
+    display: 'flex',
+    gap: '1.25rem',
+    padding: '1.5rem',
+    background: 'var(--bg-card)',
+    borderRadius: 'var(--radius-lg)',
+    boxShadow: 'var(--shadow-sm)',
+    border: '1px solid var(--border-light)',
+    alignItems: 'center',
+  },
+  qrInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  qrHeading: {
+    fontSize: '1rem',
+    fontWeight: 600,
+    marginBottom: '0.4rem',
+  },
+  qrSub: {
+    fontSize: '0.8rem',
+    color: 'var(--text-muted)',
+    lineHeight: 1.5,
+    marginBottom: '0.6rem',
+  },
+  urlCode: {
+    fontSize: '0.65rem',
+    color: 'var(--text-muted)',
+    background: 'var(--bg-muted)',
+    padding: '0.25rem 0.5rem',
+    borderRadius: 'var(--radius-sm)',
+    wordBreak: 'break-all',
+    display: 'block',
+  },
+  uploadCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '1.5rem',
+    background: 'var(--bg-card)',
+    borderRadius: 'var(--radius-lg)',
+    border: '2px dashed var(--border)',
+    cursor: 'pointer',
+    transition: 'border-color 0.15s, background 0.15s',
+  },
+  uploadCardDragOver: {
+    borderColor: 'var(--brand-purple)',
+    background: 'rgba(124,58,237,0.04)',
+  },
+  uploadIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: '50%',
+    background: 'var(--bg-muted)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '1.5rem',
+    color: 'var(--text-muted)',
+    marginBottom: '0.75rem',
+    fontWeight: 300,
+  },
+  uploadText: {
+    fontSize: '0.9rem',
+    fontWeight: 500,
+    marginBottom: '0.25rem',
+  },
+  uploadHint: {
+    fontSize: '0.75rem',
+    color: 'var(--text-muted)',
+  },
 };

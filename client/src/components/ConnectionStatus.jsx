@@ -1,24 +1,28 @@
 const STATUS_COLORS = {
-  connected: '#34c759',
-  disconnected: '#ff9500',
-  error: '#ff3b30',
+  connected: '#10b981',
+  disconnected: '#f97316',
+  error: '#ef4444',
 };
 
 export default function ConnectionStatus({ status, phoneConnected }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.85rem', color: '#86868b' }}>
+    <div style={styles.wrap}>
       {phoneConnected != null && (
-        <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-          <span style={{ ...dot, backgroundColor: phoneConnected ? '#34c759' : '#d1d1d6' }} />
+        <span style={styles.item}>
+          <span style={{ ...styles.dot, backgroundColor: phoneConnected ? '#10b981' : 'var(--border)' }} />
           {phoneConnected ? 'Phone linked' : 'Waiting for phone'}
         </span>
       )}
-      <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-        <span style={{ ...dot, backgroundColor: STATUS_COLORS[status] || '#ff9500' }} />
+      <span style={styles.item}>
+        <span style={{ ...styles.dot, backgroundColor: STATUS_COLORS[status] || '#f97316' }} />
         {status === 'connected' ? 'Connected' : status === 'error' ? 'Error' : 'Reconnecting...'}
       </span>
     </div>
   );
 }
 
-const dot = { width: 8, height: 8, borderRadius: '50%', display: 'inline-block' };
+const styles = {
+  wrap: { display: 'flex', alignItems: 'center', gap: '1rem', fontSize: '0.8rem', color: 'var(--text-muted)' },
+  item: { display: 'flex', alignItems: 'center', gap: '0.35rem' },
+  dot: { width: 7, height: 7, borderRadius: '50%', display: 'inline-block' },
+};

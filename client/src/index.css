@@ -6,21 +6,67 @@
   padding: 0;
 }
 
+:root {
+  --brand-purple: #7c3aed;
+  --brand-pink: #ec4899;
+  --brand-orange: #f97316;
+  --brand-yellow: #fbbf24;
+  --brand-green: #10b981;
+  --brand-blue: #3b82f6;
+
+  --gradient-hero: linear-gradient(135deg, #7c3aed 0%, #ec4899 50%, #f97316 100%);
+  --gradient-btn: linear-gradient(135deg, #7c3aed, #ec4899);
+  --gradient-btn-hover: linear-gradient(135deg, #6d28d9, #db2777);
+
+  --bg: #faf9f7;
+  --bg-card: #ffffff;
+  --bg-muted: #f3f2ef;
+  --text: #1a1a2e;
+  --text-muted: #6b7280;
+  --border: #e5e5e5;
+  --border-light: #f0f0f0;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
+
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --shadow-lg: 0 8px 30px rgba(0,0,0,0.1);
+  --shadow-glow: 0 4px 20px rgba(124,58,237,0.15);
+
+  --font-display: 'Fredoka', system-ui, -apple-system, sans-serif;
+  --font-body: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, monospace;
+}
+
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #f5f5f7;
-  color: #1d1d1f;
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text);
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
 }
 
 #root {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 2rem 1rem;
+  min-height: 100vh;
 }
 
 [contenteditable]:empty::before {
   content: attr(data-placeholder);
   color: #c7c7cc;
   pointer-events: none;
+}
+
+a {
+  color: var(--brand-purple);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+::selection {
+  background: rgba(124,58,237,0.15);
 }

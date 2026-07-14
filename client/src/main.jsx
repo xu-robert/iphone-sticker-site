@@ -2,6 +2,8 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { CartProvider } from './context/CartContext.jsx';
+import Layout from './components/Layout.jsx';
+import LandingPage from './pages/LandingPage.jsx';
 import DesktopPage from './pages/DesktopPage.jsx';
 import PhonePage from './pages/PhonePage.jsx';
 import CartPage from './pages/CartPage.jsx';
@@ -15,12 +17,19 @@ createRoot(document.getElementById('root')).render(
     <BrowserRouter>
       <CartProvider>
         <Routes>
-          <Route path="/" element={<DesktopPage />} />
           <Route path="/phone/:sessionId" element={<PhonePage />} />
-          <Route path="/cart" element={<CartPage />} />
-          <Route path="/order/:reference" element={<OrderConfirmationPage />} />
-          <Route path="/order-lookup" element={<OrderLookupPage />} />
           <Route path="/admin" element={<AdminPage />} />
+          <Route path="*" element={
+            <Layout>
+              <Routes>
+                <Route path="/" element={<LandingPage />} />
+                <Route path="/workspace" element={<DesktopPage />} />
+                <Route path="/cart" element={<CartPage />} />
+                <Route path="/order/:reference" element={<OrderConfirmationPage />} />
+                <Route path="/order-lookup" element={<OrderLookupPage />} />
+              </Routes>
+            </Layout>
+          } />
         </Routes>
       </CartProvider>
     </BrowserRouter>
