@@ -11,7 +11,7 @@ import sharp from 'sharp';
 import Stripe from 'stripe';
 import { Resend } from 'resend';
 import { createSession, getSession, addSticker, removeSticker } from './sessions.js';
-import { createOrder, createOrderItem, updateOrderStripeSession, markOrderPaid, getOrderByReference, getOrderByReferenceAndEmail } from './db.js';
+import { createOrder, createOrderItem, updateOrderStripeSession, markOrderPaid, getOrderByReference, getOrderByReferenceAndEmail, getAllOrders, updateOrderStatus } from './db.js';
 import { SIZES, SHIPPING_FLAT_CENTS, getSize } from './pricing.js';
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
@@ -356,6 +356,47 @@ app.post('/api/order/lookup', (req, res) => {
   const order = getOrderByReferenceAndEmail(reference.toUpperCase(), email.toLowerCase());
   if (!order) return res.status(404).json({ error: 'Order not found' });
   res.json(order);
+});
+
+// --- Admin ---
+
+const adminTokens = new Set();
+const VALID_STATUSES = ['pending', 'paid', 'processing', 'shipped', 'cancelled'];
+
+function requireAdmin(req, res, next) {
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Bearer ') || !adminTokens.has(auth.slice(7))) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
+
+app.post('/api/admin/login', (req, res) => {
+  const { password } = req.body;
+  if (!process.env.ADMIN_PASSWORD || password !== process.env.ADMIN_PASSWORD) {
+    return res.status(401).json({ error: 'Invalid password' });
+  }
+  const token = crypto.randomBytes(32).toString('hex');
+  adminTokens.add(token);
+  res.json({ token });
+});
+
+app.get('/api/admin/orders', requireAdmin, (req, res) => {
+  const status = req.query.status || null;
+  if (status && !VALID_STATUSES.includes(status)) {
+    return res.status(400).json({ error: 'Invalid status filter' });
+  }
+  res.json(getAllOrders(status));
+});
+
+app.patch('/api/admin/orders/:reference', requireAdmin, (req, res) => {
+  const { status } = req.body;
+  if (!status || !VALID_STATUSES.includes(status)) {
+    return res.status(400).json({ error: 'Invalid status' });
+  }
+  const updated = updateOrderStatus(req.params.reference, status);
+  if (!updated) return res.status(404).json({ error: 'Order not found' });
+  res.json({ success: true });
 });
 
 // --- Static / SPA ---

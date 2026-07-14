@@ -7,6 +7,7 @@ import PhonePage from './pages/PhonePage.jsx';
 import CartPage from './pages/CartPage.jsx';
 import OrderConfirmationPage from './pages/OrderConfirmationPage.jsx';
 import OrderLookupPage from './pages/OrderLookupPage.jsx';
+import AdminPage from './pages/AdminPage.jsx';
 import './index.css';
 
 createRoot(document.getElementById('root')).render(
@@ -19,6 +20,7 @@ createRoot(document.getElementById('root')).render(
           <Route path="/cart" element={<CartPage />} />
           <Route path="/order/:reference" element={<OrderConfirmationPage />} />
           <Route path="/order-lookup" element={<OrderLookupPage />} />
+          <Route path="/admin" element={<AdminPage />} />
         </Routes>
       </CartProvider>
     </BrowserRouter>

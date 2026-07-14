@@ -106,3 +106,19 @@ export function getOrderByReferenceAndEmail(reference, email) {
   order.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
   return order;
 }
+
+export function getAllOrders(statusFilter) {
+  const orders = statusFilter
+    ? db.prepare('SELECT * FROM orders WHERE status = ? ORDER BY created_at DESC').all(statusFilter)
+    : db.prepare('SELECT * FROM orders ORDER BY created_at DESC').all();
+  const itemStmt = db.prepare('SELECT * FROM order_items WHERE order_id = ?');
+  for (const order of orders) {
+    order.items = itemStmt.all(order.id);
+  }
+  return orders;
+}
+
+export function updateOrderStatus(reference, status) {
+  const result = db.prepare('UPDATE orders SET status = ? WHERE reference = ?').run(status, reference);
+  return result.changes > 0;
+}

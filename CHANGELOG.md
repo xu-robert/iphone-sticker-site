@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-07-14
+- Admin view for order management with password-protected login
+- Order list with status filters, expandable details, and status updates
+
 ## 2026-07-13
 - Order confirmation emails via Resend (sends item breakdown, totals, shipping, reference number)
 
