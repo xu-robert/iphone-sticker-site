@@ -9,11 +9,13 @@ import crypto from 'crypto';
 import os from 'os';
 import sharp from 'sharp';
 import Stripe from 'stripe';
+import { Resend } from 'resend';
 import { createSession, getSession, addSticker, removeSticker } from './sessions.js';
 import { createOrder, createOrderItem, updateOrderStripeSession, markOrderPaid, getOrderByReference, getOrderByReferenceAndEmail } from './db.js';
 import { SIZES, SHIPPING_FLAT_CENTS, getSize } from './pricing.js';
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 const PORT = process.env.PORT || 3001;
 const UPLOADS_DIR = path.join(import.meta.dirname, 'uploads');
@@ -25,7 +27,7 @@ const app = express();
 const server = createServer(app);
 
 // Stripe webhook must be registered before express.json() — needs raw body
-app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   if (!stripe) return res.status(500).json({ error: 'Stripe not configured' });
   const sig = req.headers['stripe-signature'];
   let event;
@@ -37,9 +39,74 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req,
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     markOrderPaid(session.id, session.payment_intent);
+    if (session.metadata?.order_reference) {
+      const order = getOrderByReference(session.metadata.order_reference);
+      if (order) sendOrderConfirmationEmail(order).catch(err => console.error('Email send failed:', err));
+    }
   }
   res.json({ received: true });
 });
+
+async function sendOrderConfirmationEmail(order) {
+  if (!resend) return;
+  const fromAddress = process.env.RESEND_FROM || 'orders@stickergrab.com';
+  const itemRows = order.items.map(item =>
+    `<tr>
+      <td style="padding:8px 12px;border-bottom:1px solid #f0f0f0">${item.size_label}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f0f0f0;text-align:center">${item.quantity}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f0f0f0;text-align:right">$${(item.subtotal_cents / 100).toFixed(2)}</td>
+    </tr>`
+  ).join('');
+
+  const html = `
+    <div style="max-width:520px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#1d1d1f">
+      <h1 style="font-size:24px;margin:0 0 4px">Order Confirmed!</h1>
+      <p style="color:#86868b;margin:0 0 24px">Thanks for your order. Here are the details.</p>
+
+      <div style="background:#f5f5f7;border-radius:10px;padding:16px 20px;margin-bottom:24px;text-align:center">
+        <div style="font-size:12px;color:#86868b;text-transform:uppercase;letter-spacing:0.05em">Reference</div>
+        <div style="font-size:28px;font-weight:700;font-family:monospace">${order.reference}</div>
+      </div>
+
+      <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
+        <thead>
+          <tr style="border-bottom:2px solid #e0e0e0">
+            <th style="padding:8px 12px;text-align:left;font-size:13px;color:#86868b">Item</th>
+            <th style="padding:8px 12px;text-align:center;font-size:13px;color:#86868b">Qty</th>
+            <th style="padding:8px 12px;text-align:right;font-size:13px;color:#86868b">Price</th>
+          </tr>
+        </thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+
+      <div style="text-align:right;margin-bottom:24px">
+        <div style="font-size:14px;color:#86868b;margin-bottom:4px">Subtotal: $${(order.subtotal_cents / 100).toFixed(2)}</div>
+        <div style="font-size:14px;color:#86868b;margin-bottom:4px">Shipping: $${(order.shipping_cents / 100).toFixed(2)}</div>
+        <div style="font-size:18px;font-weight:700">Total: $${(order.total_cents / 100).toFixed(2)}</div>
+      </div>
+
+      <div style="background:#f5f5f7;border-radius:10px;padding:16px 20px;margin-bottom:24px">
+        <div style="font-size:12px;color:#86868b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Shipping to</div>
+        <div style="font-size:14px;line-height:1.5">
+          ${order.shipping_name}<br>
+          ${order.shipping_line1}<br>
+          ${order.shipping_line2 ? order.shipping_line2 + '<br>' : ''}
+          ${order.shipping_city}, ${order.shipping_state} ${order.shipping_zip}<br>
+          ${order.shipping_country}
+        </div>
+      </div>
+
+      <p style="font-size:13px;color:#86868b">You can check your order status anytime with your reference number and email.</p>
+    </div>
+  `;
+
+  await resend.emails.send({
+    from: fromAddress,
+    to: order.email,
+    subject: `Order Confirmed — ${order.reference}`,
+    html,
+  });
+}
 
 // --- WebSocket ---
 
