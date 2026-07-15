@@ -25,7 +25,7 @@ export function CartProvider({ children }) {
     if (!pricing) return;
     const size = pricing.sizes.find(s => s.value === sizeValue);
     if (!size) return;
-    const id = crypto.randomUUID();
+    const id = crypto.randomUUID?.() ?? (Math.random().toString(36).slice(2) + Date.now().toString(36));
     setItems(prev => [...prev, {
       id, imageUrl, displayUrl,
       sizeValue: size.value, sizeLabel: size.label,

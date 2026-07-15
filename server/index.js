@@ -36,19 +36,26 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
   } catch (err) {
     return res.status(400).json({ error: `Webhook signature verification failed` });
   }
+  console.log(`Webhook received: ${event.type}`);
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
+    console.log(`Payment completed for order: ${session.metadata?.order_reference}, session: ${session.id}`);
     markOrderPaid(session.id, session.payment_intent);
     if (session.metadata?.order_reference) {
       const order = getOrderByReference(session.metadata.order_reference);
-      if (order) sendOrderConfirmationEmail(order).catch(err => console.error('Email send failed:', err));
+      if (order) {
+        console.log(`Sending confirmation email to ${order.email} for ${order.reference}`);
+        sendOrderConfirmationEmail(order).catch(err => console.error('Email send failed:', err));
+      } else {
+        console.error(`Order not found for reference: ${session.metadata.order_reference}`);
+      }
     }
   }
   res.json({ received: true });
 });
 
 async function sendOrderConfirmationEmail(order) {
-  if (!resend) return;
+  if (!resend) { console.error('Resend not configured — RESEND_API_KEY missing'); return; }
   const fromAddress = process.env.RESEND_FROM || 'orders@stickergrab.com';
   const itemRows = order.items.map(item =>
     `<tr>
@@ -100,12 +107,17 @@ async function sendOrderConfirmationEmail(order) {
     </div>
   `;
 
-  await resend.emails.send({
+  const { data, error } = await resend.emails.send({
     from: fromAddress,
-    to: order.email,
+    to: order.email.toLowerCase(),
     subject: `Order Confirmed — ${order.reference}`,
     html,
   });
+  if (error) {
+    console.error('Resend API error:', error);
+  } else {
+    console.log('Email sent:', data?.id);
+  }
 }
 
 // --- WebSocket ---
@@ -306,7 +318,7 @@ app.post('/api/checkout', async (req, res) => {
     createOrderItem(order.id, item);
   }
 
-  const origin = `${req.protocol}://${req.get('host')}`;
+  const origin = req.body.origin || `${req.protocol}://${req.get('host')}`;
   const line_items = validatedItems.map(item => ({
     price_data: {
       currency: 'usd',
