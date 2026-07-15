@@ -1,9 +1,12 @@
 import { Link, useLocation } from 'react-router-dom';
 import CartBadge from './CartBadge.jsx';
+import { useIsMobile } from '../hooks/useIsMobile.js';
 
 export default function Layout({ children, hideNav }) {
   const location = useLocation();
   const isHome = location.pathname === '/';
+  const isWorkspace = location.pathname === '/workspace';
+  const isMobile = useIsMobile();
 
   return (
     <div style={styles.wrapper}>
@@ -12,13 +15,15 @@ export default function Layout({ children, hideNav }) {
           <div style={styles.navInner}>
             <Link to="/" style={styles.logo}>
               <span style={styles.logoIcon}>✦</span>
-              <span style={styles.logoText}>Print Me to Life</span>
+              {!isMobile && <span style={styles.logoText}>Print Me to Life</span>}
             </Link>
             <div style={styles.navRight}>
-              {!isHome && (
+              {!isHome && !isWorkspace && (
                 <Link to="/workspace" style={styles.navLink}>Create</Link>
               )}
-              <Link to="/order-lookup" style={styles.navLink}>Track Order</Link>
+              {!isMobile && (
+                <Link to="/order-lookup" style={styles.navLink}>Track Order</Link>
+              )}
               <CartBadge />
             </div>
           </div>
@@ -45,7 +50,7 @@ const styles = {
   navInner: {
     maxWidth: 1100,
     margin: '0 auto',
-    padding: '0.75rem 1.5rem',
+    padding: '0.75rem 1rem',
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',

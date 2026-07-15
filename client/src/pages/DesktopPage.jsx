@@ -5,8 +5,10 @@ import EditModal from '../components/EditModal.jsx';
 import AddToCartModal from '../components/AddToCartModal.jsx';
 import ConnectionStatus from '../components/ConnectionStatus.jsx';
 import { useWebSocket } from '../hooks/useWebSocket.js';
+import { useIsMobile } from '../hooks/useIsMobile.js';
 
 export default function DesktopPage() {
+  const isMobile = useIsMobile();
   const [sessionId, setSessionId] = useState(null);
   const [stickers, setStickers] = useState([]);
   const [phoneConnected, setPhoneConnected] = useState(false);
@@ -139,32 +141,15 @@ export default function DesktopPage() {
 
   return (
     <div style={styles.page}>
-      <div style={styles.topRow}>
-        <ConnectionStatus status={status} phoneConnected={phoneConnected} />
-        <button onClick={handleNewSession} style={styles.newSessionBtn}>New Session</button>
-      </div>
-
-      <div style={styles.twoCol}>
-        <div style={styles.qrCard}>
-          <QRCodeSVG value={phoneUrl} size={140} level="M"
-            bgColor="transparent" fgColor="#1a1a2e" />
-          <div style={styles.qrInfo}>
-            <h2 style={styles.qrHeading}>Scan to send stickers</h2>
-            <p style={styles.qrSub}>
-              Open your phone camera and scan this code.
-              Paste stickers and they appear here instantly.
-            </p>
-            <code style={styles.urlCode}>{phoneUrl}</code>
-          </div>
+      {!isMobile && (
+        <div style={styles.topRow}>
+          <ConnectionStatus status={status} phoneConnected={phoneConnected} />
+          <button onClick={handleNewSession} style={styles.newSessionBtn}>New Session</button>
         </div>
+      )}
 
-        <div
-          style={{ ...styles.uploadCard, ...(dragOver ? styles.uploadCardDragOver : {}) }}
-          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
-          onClick={() => fileRef.current?.click()}
-        >
+      {isMobile ? (
+        <div style={styles.mobileUpload}>
           <input
             ref={fileRef}
             type="file"
@@ -173,11 +158,47 @@ export default function DesktopPage() {
             onChange={handleFileUpload}
             style={{ display: 'none' }}
           />
-          <div style={styles.uploadIcon}>+</div>
-          <p style={styles.uploadText}>Drop images here or click to upload</p>
-          <p style={styles.uploadHint}>PNG, JPG, SVG up to 20 MB</p>
+          <button onClick={() => fileRef.current?.click()} style={styles.mobileUploadBtn}>
+            Upload Stickers
+          </button>
+          <p style={styles.mobileUploadHint}>Choose images from your photos</p>
         </div>
-      </div>
+      ) : (
+        <div style={styles.twoCol}>
+          <div style={styles.qrCard}>
+            <QRCodeSVG value={phoneUrl} size={140} level="M"
+              bgColor="transparent" fgColor="#1a1a2e" />
+            <div style={styles.qrInfo}>
+              <h2 style={styles.qrHeading}>Scan to send stickers</h2>
+              <p style={styles.qrSub}>
+                Open your phone camera and scan this code.
+                Paste stickers and they appear here instantly.
+              </p>
+              <code style={styles.urlCode}>{phoneUrl}</code>
+            </div>
+          </div>
+
+          <div
+            style={{ ...styles.uploadCard, ...(dragOver ? styles.uploadCardDragOver : {}) }}
+            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+            onClick={() => fileRef.current?.click()}
+          >
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handleFileUpload}
+              style={{ display: 'none' }}
+            />
+            <div style={styles.uploadIcon}>+</div>
+            <p style={styles.uploadText}>Drop images here or click to upload</p>
+            <p style={styles.uploadHint}>PNG, JPG, SVG up to 20 MB</p>
+          </div>
+        </div>
+      )}
 
       <StickerGrid stickers={stickers} onDelete={handleDelete} onEdit={handleEdit} onOrder={handleOrder} />
 
@@ -298,5 +319,26 @@ const styles = {
   uploadHint: {
     fontSize: '0.75rem',
     color: 'var(--text-muted)',
+  },
+  mobileUpload: {
+    marginBottom: '1.5rem',
+  },
+  mobileUploadBtn: {
+    width: '100%',
+    padding: '0.9rem',
+    fontSize: '1rem',
+    fontWeight: 600,
+    color: '#fff',
+    background: 'var(--gradient-btn)',
+    border: 'none',
+    borderRadius: 'var(--radius-md)',
+    cursor: 'pointer',
+    boxShadow: 'var(--shadow-glow)',
+  },
+  mobileUploadHint: {
+    fontSize: '0.8rem',
+    color: 'var(--text-muted)',
+    textAlign: 'center',
+    marginTop: '0.5rem',
   },
 };

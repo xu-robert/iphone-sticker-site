@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { useIsMobile } from '../hooks/useIsMobile.js';
 
 const STEPS = [
   { emoji: '📱', title: 'Upload', desc: 'Send stickers from your phone or drag files from your computer.' },
@@ -15,13 +16,15 @@ const SIZES = [
 ];
 
 export default function LandingPage() {
+  const isMobile = useIsMobile();
+
   return (
     <div>
       <section style={styles.hero}>
         <div style={styles.heroInner}>
           <div style={styles.heroBadge}>Now in beta</div>
           <h1 style={styles.heroTitle}>
-            Turn anything into a{' '}
+            Turn anything into a<br />
             <span style={styles.heroGradient}>sticker</span>
           </h1>
           <p style={styles.heroSub}>
@@ -45,7 +48,7 @@ export default function LandingPage() {
 
       <section style={styles.stepsSection}>
         <h2 style={styles.sectionTitle}>How it works</h2>
-        <div style={styles.stepsGrid}>
+        <div style={{ ...styles.stepsGrid, ...(isMobile ? styles.stepsGridMobile : {}) }}>
           {STEPS.map((step, i) => (
             <div key={i} style={styles.stepCard}>
               <div style={styles.stepNum}>{i + 1}</div>
@@ -60,7 +63,7 @@ export default function LandingPage() {
       <section style={styles.pricingSection}>
         <h2 style={styles.sectionTitle}>Simple pricing</h2>
         <p style={styles.sectionSub}>High-quality vinyl, weatherproof and dishwasher-safe.</p>
-        <div style={styles.pricingGrid}>
+        <div style={{ ...styles.pricingGrid, ...(isMobile ? styles.pricingGridMobile : {}) }}>
           {SIZES.map((s, i) => (
             <div key={i} style={styles.priceCard}>
               <div style={styles.priceSize}>{s.label}</div>
@@ -99,7 +102,7 @@ const styles = {
   hero: {
     position: 'relative',
     overflow: 'hidden',
-    padding: '5rem 1.5rem 4rem',
+    padding: 'clamp(2.5rem, 8vw, 5rem) 1.25rem clamp(2rem, 6vw, 4rem)',
     textAlign: 'center',
   },
   heroInner: {
@@ -200,7 +203,9 @@ const styles = {
   stepsSection: {
     maxWidth: 900,
     margin: '0 auto',
-    padding: '3rem 1.5rem 4rem',
+    padding: 'clamp(1.5rem, 4vw, 3rem) 1rem clamp(2rem, 5vw, 4rem)',
+    boxSizing: 'border-box',
+    width: '100%',
   },
   sectionTitle: {
     fontSize: '1.75rem',
@@ -221,14 +226,21 @@ const styles = {
     gap: '1.25rem',
     marginTop: '2rem',
   },
+  stepsGridMobile: {
+    gridTemplateColumns: '1fr 1fr',
+    gap: '0.6rem',
+    margin: '1.5rem 0 0',
+  },
   stepCard: {
     background: 'var(--bg-card)',
     borderRadius: 'var(--radius-lg)',
-    padding: '1.75rem 1.5rem',
+    padding: '1.5rem 0.75rem',
     textAlign: 'center',
     boxShadow: 'var(--shadow-sm)',
     border: '1px solid var(--border-light)',
     position: 'relative',
+    overflow: 'hidden',
+    minWidth: 0,
   },
   stepNum: {
     position: 'absolute',
@@ -255,16 +267,18 @@ const styles = {
     marginBottom: '0.4rem',
   },
   stepDesc: {
-    fontSize: '0.85rem',
+    fontSize: '0.8rem',
     color: 'var(--text-muted)',
-    lineHeight: 1.5,
+    lineHeight: 1.4,
   },
 
   pricingSection: {
     maxWidth: 600,
     margin: '0 auto',
-    padding: '2rem 1.5rem 3rem',
+    padding: '2rem 1rem 3rem',
     textAlign: 'center',
+    boxSizing: 'border-box',
+    width: '100%',
   },
   pricingGrid: {
     display: 'grid',
@@ -272,12 +286,16 @@ const styles = {
     gap: '0.75rem',
     marginTop: '1.5rem',
   },
+  pricingGridMobile: {
+    gridTemplateColumns: 'repeat(2, 1fr)',
+  },
   priceCard: {
     background: 'var(--bg-card)',
     borderRadius: 'var(--radius-md)',
-    padding: '1.25rem 0.75rem',
+    padding: '1.25rem 0.5rem',
     boxShadow: 'var(--shadow-sm)',
     border: '1px solid var(--border-light)',
+    minWidth: 0,
   },
   priceSize: {
     fontSize: '1.4rem',
@@ -303,14 +321,17 @@ const styles = {
   ctaSection: {
     maxWidth: 640,
     margin: '0 auto',
-    padding: '1rem 1.5rem 4rem',
+    padding: '1rem 1rem clamp(2rem, 5vw, 4rem)',
+    boxSizing: 'border-box',
+    width: '100%',
   },
   ctaCard: {
     background: 'var(--gradient-hero)',
     borderRadius: 'var(--radius-xl)',
-    padding: '3rem 2rem',
+    padding: 'clamp(2rem, 5vw, 3rem) clamp(1.25rem, 4vw, 2rem)',
     textAlign: 'center',
     boxShadow: 'var(--shadow-lg)',
+    overflow: 'hidden',
   },
   ctaTitle: {
     fontSize: '1.5rem',

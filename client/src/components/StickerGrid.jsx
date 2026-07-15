@@ -1,16 +1,22 @@
+import { useIsMobile } from '../hooks/useIsMobile.js';
+
 export default function StickerGrid({ stickers, onDelete, onEdit, onOrder }) {
+  const isMobile = useIsMobile();
+
   if (stickers.length === 0) {
     return (
       <div style={styles.empty}>
         <div style={styles.emptyIcon}>✦</div>
         <p style={styles.emptyTitle}>No stickers yet</p>
-        <p style={styles.emptyText}>Scan the QR code with your phone or upload images to get started.</p>
+        <p style={styles.emptyText}>
+          {isMobile ? 'Tap the upload button to add your first sticker.' : 'Scan the QR code with your phone or upload images to get started.'}
+        </p>
       </div>
     );
   }
 
   return (
-    <div style={styles.grid}>
+    <div style={{ ...styles.grid, ...(isMobile ? styles.gridMobile : {}) }}>
       {stickers.map((sticker) => (
         <div key={sticker.filename} style={styles.card}>
           <div style={styles.imageWrap}>
@@ -38,6 +44,10 @@ const styles = {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
     gap: '1rem',
+  },
+  gridMobile: {
+    gridTemplateColumns: 'repeat(2, 1fr)',
+    gap: '0.75rem',
   },
   card: {
     background: 'var(--bg-card)',
