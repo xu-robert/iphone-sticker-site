@@ -17,7 +17,9 @@ export default function DesktopPage() {
   const [editingSticker, setEditingSticker] = useState(null);
   const [orderingSticker, setOrderingSticker] = useState(null);
   const [dragOver, setDragOver] = useState(false);
+  const [sending, setSending] = useState(false);
   const fileRef = useRef(null);
+  const pasteRef = useRef(null);
 
   useEffect(() => {
     fetch('/api/host').then((r) => r.json()).then((d) => setLanHost(d));
@@ -102,6 +104,57 @@ export default function DesktopPage() {
     if (files.length > 0) await uploadFiles(files);
   }, [uploadFiles]);
 
+  const extractAndUpload = useCallback(async () => {
+    const el = pasteRef.current;
+    if (!el) return;
+    const images = el.querySelectorAll('img');
+    if (images.length === 0) return;
+    setSending(true);
+    for (const img of images) {
+      try {
+        const blob = await imageElementToBlob(img);
+        if (!blob) continue;
+        const form = new FormData();
+        form.append('sticker', blob, 'sticker.png');
+        await fetch(`/api/session/${sessionId}/upload`, { method: 'POST', body: form });
+      } catch (e) {
+        console.error('Upload failed:', e);
+      }
+    }
+    el.innerHTML = '';
+    setSending(false);
+  }, [sessionId]);
+
+  const handlePasteInput = useCallback(() => {
+    const el = pasteRef.current;
+    if (!el) return;
+    if (el.querySelector('img')) {
+      setTimeout(extractAndUpload, 100);
+    }
+  }, [extractAndUpload]);
+
+  const handlePaste = useCallback(async (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const blob = item.getAsFile();
+        if (!blob) continue;
+        setSending(true);
+        const form = new FormData();
+        form.append('sticker', blob, 'sticker.png');
+        try {
+          await fetch(`/api/session/${sessionId}/upload`, { method: 'POST', body: form });
+        } catch (err) {
+          console.error('Upload failed:', err);
+        }
+        setSending(false);
+        return;
+      }
+    }
+  }, [sessionId]);
+
   const handleEdit = useCallback((sticker) => {
     setEditingSticker(sticker);
   }, []);
@@ -150,6 +203,14 @@ export default function DesktopPage() {
 
       {isMobile ? (
         <div style={styles.mobileUpload}>
+          <div
+            ref={pasteRef}
+            contentEditable
+            onInput={handlePasteInput}
+            onPaste={handlePaste}
+            style={styles.pasteArea}
+            data-placeholder="Tap here and paste a sticker..."
+          />
           <input
             ref={fileRef}
             type="file"
@@ -159,9 +220,9 @@ export default function DesktopPage() {
             style={{ display: 'none' }}
           />
           <button onClick={() => fileRef.current?.click()} style={styles.mobileUploadBtn}>
-            Upload Stickers
+            Choose from Photos
           </button>
-          <p style={styles.mobileUploadHint}>Choose images from your photos</p>
+          {sending && <p style={styles.sendingText}>Sending...</p>}
         </div>
       ) : (
         <div style={styles.twoCol}>
@@ -218,6 +279,19 @@ export default function DesktopPage() {
       )}
     </div>
   );
+}
+
+async function imageElementToBlob(img) {
+  if (img.src.startsWith('data:') || img.src.startsWith('blob:')) {
+    const res = await fetch(img.src);
+    return res.blob();
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth || img.width || 300;
+  canvas.height = img.naturalHeight || img.height || 300;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
 }
 
 const styles = {
@@ -323,9 +397,22 @@ const styles = {
   mobileUpload: {
     marginBottom: '1.5rem',
   },
+  pasteArea: {
+    minHeight: 120,
+    padding: '1rem',
+    borderRadius: 'var(--radius-md)',
+    border: '2px dashed var(--border)',
+    background: 'var(--bg-card)',
+    fontSize: '1rem',
+    outline: 'none',
+    lineHeight: 1.6,
+    WebkitUserSelect: 'text',
+    position: 'relative',
+    marginBottom: '0.75rem',
+  },
   mobileUploadBtn: {
     width: '100%',
-    padding: '0.9rem',
+    padding: '0.85rem',
     fontSize: '1rem',
     fontWeight: 600,
     color: '#fff',
@@ -333,12 +420,10 @@ const styles = {
     border: 'none',
     borderRadius: 'var(--radius-md)',
     cursor: 'pointer',
-    boxShadow: 'var(--shadow-glow)',
   },
-  mobileUploadHint: {
-    fontSize: '0.8rem',
-    color: 'var(--text-muted)',
-    textAlign: 'center',
-    marginTop: '0.5rem',
+  sendingText: {
+    color: 'var(--brand-purple)',
+    fontSize: '0.85rem',
+    fontWeight: 500,
   },
 };
