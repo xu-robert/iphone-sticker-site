@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-15
+- "Print Me to Life" branding, landing page with hero, how-it-works, pricing, and CTA sections
+- Shared nav bar with sticky header and cart badge
+- Redesigned all pages with consistent design system (CSS variables, new color palette, rounded cards)
+- Mobile responsiveness — hide QR on phone, responsive grids, mobile upload flow
+- Mobile paste input and drag-drop upload on workspace
+- Fixed mobile checkout: correct Stripe redirect URL, cart ID fallback for HTTP, email case sensitivity
+
 ## 2026-07-14
 - Admin view for order management with password-protected login
 - Order list with status filters, expandable details, and status updates
