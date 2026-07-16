@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { traceContour } from '../helpers/contourTracing.js';
 import { loadRMBGModel, runRMBG, applyAlphaToImage } from '../helpers/rmbgModel.js';
+import { useIsMobile } from '../hooks/useIsMobile.js';
 
 const DEFAULT_SIZE_IN = 2;
 const MAX_SIZE_IN = 5;
@@ -102,6 +103,11 @@ function drawCutShapePath(ctx, cutType, w, h) {
   }
 }
 
+function getPointer(e) {
+  if (e.touches) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  return { x: e.clientX, y: e.clientY };
+}
+
 function useDraggable(initialPos, initialSizeIn, pxPerInch, aspectRatio, onPosChange, onSizeChange, onDragStart, onDragEnd) {
   const draggingRef = useRef(false);
 
@@ -110,34 +116,48 @@ function useDraggable(initialPos, initialSizeIn, pxPerInch, aspectRatio, onPosCh
     e.preventDefault();
     draggingRef.current = 'move';
     onDragStart();
-    const startX = e.clientX, startY = e.clientY;
+    const start = getPointer(e);
     const startPos = { ...initialPos };
+    const isTouch = !!e.touches;
     function onMove(e) {
       if (draggingRef.current !== 'move') return;
-      onPosChange({ x: startPos.x + (e.clientX - startX), y: startPos.y + (e.clientY - startY) });
+      const p = getPointer(e);
+      onPosChange({ x: startPos.x + (p.x - start.x), y: startPos.y + (p.y - start.y) });
     }
-    function onUp() { draggingRef.current = false; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); onDragEnd(); }
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    function onUp() {
+      draggingRef.current = false;
+      window.removeEventListener(isTouch ? 'touchmove' : 'mousemove', onMove);
+      window.removeEventListener(isTouch ? 'touchend' : 'mouseup', onUp);
+      onDragEnd();
+    }
+    window.addEventListener(isTouch ? 'touchmove' : 'mousemove', onMove, { passive: false });
+    window.addEventListener(isTouch ? 'touchend' : 'mouseup', onUp);
   }, [initialPos, onPosChange, onDragStart, onDragEnd]);
 
   const handleResizeStart = useCallback((e) => {
     e.preventDefault(); e.stopPropagation();
     draggingRef.current = 'resize';
     onDragStart();
-    const startX = e.clientX, startY = e.clientY;
+    const start = getPointer(e);
     const startW = initialSizeIn;
+    const isTouch = !!e.touches;
     function onMove(e) {
       if (draggingRef.current !== 'resize') return;
-      const dx = e.clientX - startX, dy = e.clientY - startY;
+      const p = getPointer(e);
+      const dx = p.x - start.x, dy = p.y - start.y;
       const delta = (Math.abs(dx) > Math.abs(dy) ? dx : dy) / pxPerInch;
       let newW = Math.max(0.25, Math.min(MAX_SIZE_IN, startW + delta));
       if (aspectRatio && newW / aspectRatio > MAX_SIZE_IN) newW = MAX_SIZE_IN * aspectRatio;
       onSizeChange(newW);
     }
-    function onUp() { draggingRef.current = false; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); onDragEnd(); }
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    function onUp() {
+      draggingRef.current = false;
+      window.removeEventListener(isTouch ? 'touchmove' : 'mousemove', onMove);
+      window.removeEventListener(isTouch ? 'touchend' : 'mouseup', onUp);
+      onDragEnd();
+    }
+    window.addEventListener(isTouch ? 'touchmove' : 'mousemove', onMove, { passive: false });
+    window.addEventListener(isTouch ? 'touchend' : 'mouseup', onUp);
   }, [initialSizeIn, pxPerInch, aspectRatio, onSizeChange, onDragStart, onDragEnd]);
 
   return { handleMoveStart, handleResizeStart };
@@ -175,15 +195,16 @@ function DraggableObject({ pos, widthPx, heightPx, onMoveStart, onResizeStart, s
   return (
     <div
       onMouseDown={onMoveStart}
+      onTouchStart={onMoveStart}
       style={{
         position: 'absolute', left: pos.x, top: pos.y,
         width: widthPx, height: heightPx, cursor: 'grab',
         outline: selected ? '2px dashed #007aff' : 'none',
-        outlineOffset: 2,
+        outlineOffset: 2, touchAction: 'none',
       }}
     >
       {children}
-      <div onMouseDown={onResizeStart} style={styles.dragHandle} />
+      <div onMouseDown={onResizeStart} onTouchStart={onResizeStart} style={styles.dragHandle} />
     </div>
   );
 }
@@ -248,6 +269,7 @@ function renderFinal(img, cutType, cutBgColor, shapeWidthPx, shapeHeightPx, stic
 }
 
 export default function EditModal({ sticker, onSave, onCancel }) {
+  const isMobile = useIsMobile();
   const prev = sticker.settings || {};
   const [outlineEnabled, setOutlineEnabled] = useState(prev.outlineEnabled || false);
   const [outlineColor, setOutlineColor] = useState(prev.outlineColor || '#ffffff');
@@ -444,6 +466,125 @@ export default function EditModal({ sticker, onSave, onCancel }) {
   );
   const outlineError = outlineEnabled && !objectsOverlap;
 
+  if (isMobile) {
+    return (
+      <div style={styles.backdrop} onClick={onCancel}>
+        <div style={styles.mobileModal} onClick={(e) => e.stopPropagation()}>
+          <div style={styles.mobileHeader}>
+            <button onClick={onCancel} style={styles.mobileHeaderBtn}>Cancel</button>
+            <h2 style={styles.mobileHeaderTitle}>Edit Sticker</h2>
+            <button onClick={handleSave} style={styles.mobileHeaderSave}>Save</button>
+          </div>
+
+          <div style={styles.mobileWorkspaceWrap}>
+            <div ref={workspaceRef} style={styles.mobileWorkspace}>
+              {outlineEnabled && !outlineError && traceResult && traceResult.segments.length > 0 && (() => {
+                const pad = outlineCanvasPx + 2;
+                const baseX = cutType === 'contour' ? stickerPos.x : Math.min(stickerPos.x, shapePos.x);
+                const baseY = cutType === 'contour' ? stickerPos.y : Math.min(stickerPos.y, shapePos.y);
+                const contentW = cutType === 'contour' ? stickerPxW : traceTargetW;
+                const contentH = cutType === 'contour' ? stickerPxH : traceTargetH;
+                const svgW = contentW + pad * 2;
+                const svgH = contentH + pad * 2;
+                return (
+                  <svg
+                    style={{ position: 'absolute', pointerEvents: 'none', left: baseX - pad, top: baseY - pad }}
+                    width={svgW} height={svgH}
+                    viewBox={`0 0 ${svgW} ${svgH}`}
+                  >
+                    <g transform={`translate(${pad},${pad})`}>
+                      <path d={traceResult.svgPath} fill={outlineColor} />
+                    </g>
+                  </svg>
+                );
+              })()}
+
+              {showCutOptions && shapeWidthIn !== null && (
+                <DraggableObject pos={shapePos} widthPx={shapePxW} heightPx={shapePxH}
+                  onMoveStart={shapeDrag.handleMoveStart} onResizeStart={shapeDrag.handleResizeStart} selected={false}>
+                  <svg width="100%" height="100%" viewBox={`0 0 ${shapePxW} ${shapePxH}`} style={{ position: 'absolute', top: 0, left: 0 }}>
+                    {cutType === 'circle' && <ellipse cx={shapePxW / 2} cy={shapePxH / 2} rx={shapePxW / 2} ry={shapePxH / 2} fill={cutBgColor} />}
+                    {cutType === 'square' && <rect width={shapePxW} height={shapePxH} fill={cutBgColor} />}
+                    {cutType === 'rounded' && <rect width={shapePxW} height={shapePxH} rx={Math.min(shapePxW, shapePxH) * 0.15} fill={cutBgColor} />}
+                  </svg>
+                </DraggableObject>
+              )}
+
+              {stickerWidthIn !== null && img && (
+                <DraggableObject pos={stickerPos} widthPx={stickerPxW} heightPx={stickerPxH}
+                  onMoveStart={stickerDrag.handleMoveStart} onResizeStart={stickerDrag.handleResizeStart} selected={false}>
+                  <img src={activeImageUrl} alt="Sticker" style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} />
+                </DraggableObject>
+              )}
+
+              {tracing && <div style={styles.tracingOverlay}>Processing...</div>}
+              {outlineError && <div style={styles.errorOverlay}>Sticker and shape must overlap</div>}
+            </div>
+          </div>
+
+          <div style={styles.mobileControls}>
+            <div style={styles.mobileControlRow}>
+              <div style={styles.mobileControlLabel}>
+                <span style={styles.mobileControlIcon}>✂️</span>
+                <span>Remove Background</span>
+              </div>
+              <ToggleSwitch checked={bgRemovalEnabled} onChange={handleBgRemovalToggle} disabled={bgRemovalRunning} />
+            </div>
+            {bgRemovalRunning && (
+              <p style={styles.mobileHint}>{bgRemovalProgress}</p>
+            )}
+
+            <div style={styles.mobileDivider} />
+
+            <div style={styles.mobileControlRow}>
+              <div style={styles.mobileControlLabel}>
+                <span style={styles.mobileControlIcon}>◯</span>
+                <span>Outline</span>
+              </div>
+              <ToggleSwitch checked={outlineEnabled} onChange={setOutlineEnabled} />
+            </div>
+            {outlineEnabled && (
+              <div style={styles.mobileOutlineOptions}>
+                <div style={styles.mobileColorRow}>
+                  <span style={styles.mobileSubLabel}>Color</span>
+                  <input type="color" value={outlineColor} onChange={(e) => setOutlineColor(e.target.value)} style={styles.mobileColorInput} />
+                </div>
+                <div style={styles.mobileColorRow}>
+                  <span style={styles.mobileSubLabel}>Thickness</span>
+                  <input type="range" min={thicknessStep} max={thicknessMax} step={thicknessStep}
+                    value={outlineThickness} onChange={(e) => setOutlineThickness(parseFloat(e.target.value) || 0)}
+                    style={styles.mobileRange} />
+                </div>
+              </div>
+            )}
+
+            <div style={styles.mobileDivider} />
+
+            <div style={{ marginBottom: '0.4rem' }}>
+              <div style={styles.mobileControlLabel}>
+                <span style={styles.mobileControlIcon}>⬡</span>
+                <span>Cut Shape</span>
+              </div>
+            </div>
+            <div style={styles.mobileChipRow}>
+              {CUT_TYPES.map((t) => (
+                <button key={t.value} onClick={() => setCutType(t.value)}
+                  style={cutType === t.value ? { ...styles.mobileChip, ...styles.mobileChipActive } : styles.mobileChip}
+                >{t.label}</button>
+              ))}
+            </div>
+            {showCutOptions && (
+              <div style={styles.mobileColorRow}>
+                <span style={styles.mobileSubLabel}>Background</span>
+                <input type="color" value={cutBgColor} onChange={(e) => setCutBgColor(e.target.value)} style={styles.mobileColorInput} />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={styles.backdrop} onClick={onCancel}>
       <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
@@ -459,7 +600,6 @@ export default function EditModal({ sticker, onSave, onCancel }) {
               <Ruler length={workspaceSize.w} pxPerInch={pxPerInch} unit={unit} />
               <Ruler length={workspaceSize.h} pxPerInch={pxPerInch} unit={unit} vertical />
               <div ref={workspaceRef} style={styles.workspace}>
-                {/* Outline — rendered first so it's behind everything */}
                 {outlineEnabled && !outlineError && traceResult && traceResult.segments.length > 0 && (() => {
                   const pad = outlineCanvasPx + 2;
                   const baseX = cutType === 'contour' ? stickerPos.x : Math.min(stickerPos.x, shapePos.x);
@@ -481,7 +621,6 @@ export default function EditModal({ sticker, onSave, onCancel }) {
                   );
                 })()}
 
-                {/* Cut shape */}
                 {showCutOptions && shapeWidthIn !== null && (
                   <DraggableObject pos={shapePos} widthPx={shapePxW} heightPx={shapePxH}
                     onMoveStart={shapeDrag.handleMoveStart} onResizeStart={shapeDrag.handleResizeStart} selected={false}>
@@ -493,7 +632,6 @@ export default function EditModal({ sticker, onSave, onCancel }) {
                   </DraggableObject>
                 )}
 
-                {/* Sticker */}
                 {stickerWidthIn !== null && img && (
                   <DraggableObject pos={stickerPos} widthPx={stickerPxW} heightPx={stickerPxH}
                     onMoveStart={stickerDrag.handleMoveStart} onResizeStart={stickerDrag.handleResizeStart} selected={false}>
@@ -617,6 +755,86 @@ const styles = {
     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex',
     alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+  },
+  mobileModal: {
+    position: 'fixed', inset: 0, background: 'var(--bg)',
+    display: 'flex', flexDirection: 'column', zIndex: 1001,
+  },
+  mobileHeader: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    padding: '0.75rem 1rem', borderBottom: '1px solid var(--border-light)',
+    background: 'var(--bg-card)', flexShrink: 0,
+  },
+  mobileHeaderTitle: {
+    fontSize: '1rem', fontWeight: 600, margin: 0,
+  },
+  mobileHeaderBtn: {
+    background: 'none', border: 'none', fontSize: '0.95rem',
+    color: 'var(--text-muted)', cursor: 'pointer', padding: '0.4rem 0.5rem',
+  },
+  mobileHeaderSave: {
+    background: 'none', border: 'none', fontSize: '0.95rem',
+    fontWeight: 600, color: 'var(--brand-purple)', cursor: 'pointer', padding: '0.4rem 0.5rem',
+  },
+  mobileWorkspaceWrap: {
+    flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden',
+  },
+  mobileWorkspace: {
+    position: 'absolute', inset: 0, overflow: 'hidden',
+    background: 'repeating-conic-gradient(#e8e8e8 0% 25%, #fff 0% 50%) 0 0 / 16px 16px',
+  },
+  mobileControls: {
+    flexShrink: 0, background: 'var(--bg-card)',
+    borderTop: '1px solid var(--border-light)', padding: '0.75rem 1.25rem',
+    paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+    maxHeight: '45vh', overflowY: 'auto',
+  },
+  mobileControlRow: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    padding: '0.6rem 0',
+  },
+  mobileControlLabel: {
+    display: 'flex', alignItems: 'center', gap: '0.6rem',
+    fontSize: '0.95rem', fontWeight: 500,
+  },
+  mobileControlIcon: {
+    fontSize: '1.1rem', width: 24, textAlign: 'center',
+  },
+  mobileDivider: {
+    height: 1, background: 'var(--border-light)', margin: '0.25rem 0',
+  },
+  mobileOutlineOptions: {
+    padding: '0.25rem 0 0.25rem 2.1rem',
+    display: 'flex', flexDirection: 'column', gap: '0.6rem',
+  },
+  mobileColorRow: {
+    display: 'flex', alignItems: 'center', gap: '0.75rem',
+  },
+  mobileSubLabel: {
+    fontSize: '0.85rem', color: 'var(--text-muted)', minWidth: 64,
+  },
+  mobileColorInput: {
+    width: 36, height: 36, border: 'none', borderRadius: 8,
+    cursor: 'pointer', padding: 0,
+  },
+  mobileRange: {
+    flex: 1, accentColor: 'var(--brand-purple)',
+  },
+  mobileChipRow: {
+    display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.5rem',
+  },
+  mobileChip: {
+    padding: '0.4rem 0.75rem', borderRadius: 8, fontSize: '0.8rem',
+    fontWeight: 500, cursor: 'pointer', border: '1.5px solid var(--border)',
+    background: 'var(--bg-card)', color: 'var(--text)',
+  },
+  mobileChipActive: {
+    borderColor: 'var(--brand-purple)', background: 'rgba(124,58,237,0.06)',
+    color: 'var(--brand-purple)',
+  },
+  mobileHint: {
+    fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic',
+    padding: '0 0 0.25rem 2.1rem',
   },
   modal: {
     background: '#fff', borderRadius: 16, boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
