@@ -52,13 +52,17 @@ export function CartProvider({ children }) {
 
   const clearCart = useCallback(() => setItems([]), []);
 
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const openDrawer = useCallback(() => setDrawerOpen(true), []);
+  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+
   const itemCount = items.reduce((sum, i) => sum + i.quantity, 0);
   const subtotalCents = items.reduce((sum, i) => sum + i.unitPriceCents * i.quantity, 0);
 
   const value = useMemo(() => ({
     items, pricing, addItem, removeItem, updateItemQuantity, updateItemSize, clearCart,
-    itemCount, subtotalCents,
-  }), [items, pricing, addItem, removeItem, updateItemQuantity, updateItemSize, clearCart, itemCount, subtotalCents]);
+    itemCount, subtotalCents, drawerOpen, openDrawer, closeDrawer,
+  }), [items, pricing, addItem, removeItem, updateItemQuantity, updateItemSize, clearCart, itemCount, subtotalCents, drawerOpen, openDrawer, closeDrawer]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

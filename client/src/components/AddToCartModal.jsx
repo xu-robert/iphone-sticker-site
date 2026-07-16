@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useCart } from '../context/CartContext.jsx';
 
 export default function AddToCartModal({ sticker, onClose }) {
-  const { pricing, addItem } = useCart();
+  const { pricing, addItem, openDrawer } = useCart();
   const [sizeValue, setSizeValue] = useState('3in');
   const [quantity, setQuantity] = useState(1);
   const [finalizing, setFinalizing] = useState(false);
@@ -33,9 +33,11 @@ export default function AddToCartModal({ sticker, onClose }) {
       }
       addItem(imageUrl, displayUrl, sizeValue, quantity);
       onClose();
+      openDrawer();
     } catch {
       addItem(displayUrl, displayUrl, sizeValue, quantity);
       onClose();
+      openDrawer();
     }
   };
 

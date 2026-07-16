@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import CartBadge from './CartBadge.jsx';
+import CartDrawer from './CartDrawer.jsx';
 import { useIsMobile } from '../hooks/useIsMobile.js';
 
 export default function Layout({ children, hideNav }) {
@@ -30,6 +31,7 @@ export default function Layout({ children, hideNav }) {
         </nav>
       )}
       <main>{children}</main>
+      <CartDrawer />
     </div>
   );
 }
