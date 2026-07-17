@@ -21,12 +21,22 @@ Create a `.env` in the project root:
 ```
 STRIPE_SECRET_KEY=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_CURRENCY=cad                    # or usd — used for Stripe checkout
 RESEND_API_KEY=re_...
 RESEND_FROM=orders@yourdomain.com
 ADMIN_PASSWORD=your-admin-password
+
+# Shippo (optional — falls back to format validation + flat-rate estimates without it)
+SHIPPO_API_TOKEN=shippo_test_...
+SHIPPO_ORIGIN_NAME=Print Me to Life
+SHIPPO_ORIGIN_STREET=123 Main St
+SHIPPO_ORIGIN_CITY=Toronto
+SHIPPO_ORIGIN_STATE=ON
+SHIPPO_ORIGIN_ZIP=M5V1A1
+SHIPPO_ORIGIN_COUNTRY=CA
 ```
 
-All are optional for local dev — features degrade gracefully (no payments, no emails, no admin).
+All are optional for local dev — features degrade gracefully (no payments, no emails, no admin, estimated shipping rates).
 
 ## Architecture
 
@@ -65,6 +75,8 @@ client/                     React SPA (Vite)
 server/
   index.js                  Express + WebSocket server, Stripe checkout/webhooks, image upload,
                             order API, admin API, Resend email integration
+  shipping.js               Shippo API integration — address validation, multi-carrier shipping
+                            rates, delivery estimates. Falls back to format checks + flat rates
   sessions.js               In-memory session store (phone-to-desktop pairing), 24h expiry
   db.js                     SQLite database for orders and order items (better-sqlite3)
   pricing.js                Sticker size/price definitions and shipping cost
@@ -89,5 +101,6 @@ server/
 - **Background removal**: Runs entirely client-side using ONNX Runtime with the RMBG model (~40MB, loaded on demand).
 - **Contour tracing**: Generates bezier curve outlines around stickers for die-cut lines.
 - **Cart persistence**: Stored in localStorage so it survives page refreshes. Cleared on successful checkout.
-- **Payments**: Stripe Checkout Sessions with webhook for payment confirmation.
+- **Shipping**: Shippo API for address validation, multi-carrier shipping rates (Canada Post, USPS, UPS, FedEx), and delivery estimates. Falls back to format validation + flat-rate estimates when `SHIPPO_API_TOKEN` isn't set.
+- **Payments**: Stripe Checkout Sessions with webhook for payment confirmation. Currency configurable via `STRIPE_CURRENCY`.
 - **Emails**: Order confirmation via Resend. Recipient emails are lowercased before sending (Resend is case-sensitive).

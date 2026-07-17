@@ -12,7 +12,8 @@ import Stripe from 'stripe';
 import { Resend } from 'resend';
 import { createSession, getSession, addSticker, removeSticker } from './sessions.js';
 import { createOrder, createOrderItem, updateOrderStripeSession, markOrderPaid, getOrderByReference, getOrderByReferenceAndEmail, getAllOrders, updateOrderStatus } from './db.js';
-import { SIZES, SHIPPING_FLAT_CENTS, getSize } from './pricing.js';
+import { SIZES, SHIPPING_FLAT_CENTS, TAX_RATES, getTaxRate, getSize } from './pricing.js';
+import { isConfigured as isShippingConfigured, validateAddress, getShippingRates } from './shipping.js';
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
@@ -271,7 +272,13 @@ app.use('/orders-assets', express.static(ORDERS_ASSETS_DIR));
 // --- Orders / E-Commerce ---
 
 app.get('/api/pricing', (req, res) => {
-  res.json({ sizes: SIZES, shippingCents: SHIPPING_FLAT_CENTS });
+  res.json({
+    sizes: SIZES,
+    shippingCents: SHIPPING_FLAT_CENTS,
+    taxRates: TAX_RATES,
+    currency: process.env.STRIPE_CURRENCY || 'cad',
+    shippingConfigured: isShippingConfigured(),
+  });
 });
 
 app.post('/api/cart/finalize-image', express.json({ limit: '20mb' }), (req, res) => {
@@ -288,9 +295,23 @@ app.post('/api/cart/finalize-image', express.json({ limit: '20mb' }), (req, res)
   res.json({ imageUrl: `/orders-assets/${filename}` });
 });
 
+app.post('/api/address/validate', async (req, res) => {
+  const { address } = req.body;
+  if (!address) return res.status(400).json({ error: 'Address required' });
+  const result = await validateAddress(address);
+  res.json(result);
+});
+
+app.post('/api/shipping/rates', async (req, res) => {
+  const { postalCode, country } = req.body;
+  if (!postalCode) return res.status(400).json({ error: 'Postal code required' });
+  const result = await getShippingRates(postalCode, country || 'CA');
+  res.json(result);
+});
+
 app.post('/api/checkout', async (req, res) => {
   if (!stripe) return res.status(500).json({ error: 'Stripe not configured' });
-  const { items, shipping } = req.body;
+  const { items, shipping, shippingRateCents } = req.body;
   if (!items?.length || !shipping?.email || !shipping?.name || !shipping?.line1 || !shipping?.city || !shipping?.state || !shipping?.zip) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
@@ -305,13 +326,17 @@ app.post('/api/checkout', async (req, res) => {
     validatedItems.push({ ...size, quantity: qty, imageUrl: item.imageUrl });
   }
 
-  const totalCents = subtotalCents + SHIPPING_FLAT_CENTS;
+  const appliedShipping = typeof shippingRateCents === 'number' && shippingRateCents > 0 ? shippingRateCents : SHIPPING_FLAT_CENTS;
+  const taxInfo = getTaxRate(shipping.state, shipping.country);
+  const taxableCents = subtotalCents + appliedShipping;
+  const taxCents = taxInfo ? Math.round(taxableCents * taxInfo.rate) : 0;
+  const totalCents = taxableCents + taxCents;
   const order = createOrder({
     email: shipping.email, name: shipping.name,
     line1: shipping.line1, line2: shipping.line2,
     city: shipping.city, state: shipping.state, zip: shipping.zip,
-    country: shipping.country || 'US',
-    subtotalCents, shippingCents: SHIPPING_FLAT_CENTS, totalCents,
+    country: shipping.country || 'CA',
+    subtotalCents, shippingCents: appliedShipping, taxCents, totalCents,
   });
 
   for (const item of validatedItems) {
@@ -319,9 +344,10 @@ app.post('/api/checkout', async (req, res) => {
   }
 
   const origin = req.body.origin || `${req.protocol}://${req.get('host')}`;
+  const currency = process.env.STRIPE_CURRENCY || 'cad';
   const line_items = validatedItems.map(item => ({
     price_data: {
-      currency: 'usd',
+      currency,
       product_data: {
         name: `Custom Sticker - ${item.label}`,
         images: item.imageUrl.startsWith('/') ? [`${origin}${item.imageUrl}`] : [item.imageUrl],
@@ -332,12 +358,22 @@ app.post('/api/checkout', async (req, res) => {
   }));
   line_items.push({
     price_data: {
-      currency: 'usd',
-      product_data: { name: 'Shipping (Flat Rate)' },
-      unit_amount: SHIPPING_FLAT_CENTS,
+      currency,
+      product_data: { name: 'Shipping' },
+      unit_amount: appliedShipping,
     },
     quantity: 1,
   });
+  if (taxCents > 0) {
+    line_items.push({
+      price_data: {
+        currency,
+        product_data: { name: `Tax (${taxInfo.label})` },
+        unit_amount: taxCents,
+      },
+      quantity: 1,
+    });
+  }
 
   try {
     const session = await stripe.checkout.sessions.create({

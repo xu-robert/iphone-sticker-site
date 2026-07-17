@@ -1,17 +1,68 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useCart } from '../context/CartContext.jsx';
 
+function formatDeliveryDate(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
+}
+
 export default function CartPage() {
   const { items, pricing, removeItem, updateItemQuantity, updateItemSize, clearCart, subtotalCents } = useCart();
-  const [shipping, setShipping] = useState({ email: '', name: '', line1: '', line2: '', city: '', state: '', zip: '', country: 'US' });
+  const [shipping, setShipping] = useState({ email: '', name: '', line1: '', line2: '', city: '', state: '', zip: '', country: 'CA' });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  const shippingCents = pricing?.shippingCents || 399;
-  const totalCents = subtotalCents + (items.length > 0 ? shippingCents : 0);
+  const [shippingRates, setShippingRates] = useState(null);
+  const [selectedRate, setSelectedRate] = useState(null);
+  const [loadingRates, setLoadingRates] = useState(false);
+  const rateDebounceRef = useRef(null);
 
-  const updateField = (field, value) => setShipping(prev => ({ ...prev, [field]: value }));
+  const shippingCents = selectedRate?.priceCents || pricing?.shippingCents || 399;
+  const hasAddress = shipping.state && shipping.zip?.trim().length >= 3;
+  const taxRate = hasAddress && (shipping.country || 'CA').toUpperCase() === 'CA' && pricing?.taxRates
+    ? pricing.taxRates[shipping.state.toUpperCase().trim()] : null;
+  const taxableCents = subtotalCents + (hasAddress ? shippingCents : 0);
+  const taxCents = taxRate ? Math.round(taxableCents * taxRate.rate) : 0;
+  const totalCents = subtotalCents + (items.length > 0 && hasAddress ? shippingCents + taxCents : 0);
+
+  const updateField = (field, value) => {
+    setShipping(prev => ({ ...prev, [field]: value }));
+  };
+
+  const fetchRates = useCallback(async (postalCode, country) => {
+    setLoadingRates(true);
+    try {
+      const res = await fetch('/api/shipping/rates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postalCode, country }),
+      });
+      const data = await res.json();
+      setShippingRates(data);
+      if (data.rates?.length > 0) {
+        setSelectedRate(data.rates[0]);
+      }
+    } catch {
+      setShippingRates(null);
+    } finally {
+      setLoadingRates(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const zip = shipping.zip?.trim();
+    if (!zip || zip.length < 3) {
+      setShippingRates(null);
+      setSelectedRate(null);
+      return;
+    }
+    if (rateDebounceRef.current) clearTimeout(rateDebounceRef.current);
+    rateDebounceRef.current = setTimeout(() => {
+      fetchRates(zip, shipping.country);
+    }, 600);
+    return () => clearTimeout(rateDebounceRef.current);
+  }, [shipping.zip, shipping.country, fetchRates]);
 
   const handleCheckout = async () => {
     setError('');
@@ -27,6 +78,7 @@ export default function CartPage() {
         body: JSON.stringify({
           items: items.map(i => ({ imageUrl: i.imageUrl, sizeValue: i.sizeValue, quantity: i.quantity })),
           shipping,
+          shippingRateCents: selectedRate?.priceCents || null,
           origin: window.location.origin,
         }),
       });
@@ -93,32 +145,98 @@ export default function CartPage() {
         </div>
 
         <div style={styles.sidebar}>
+          <div style={styles.shippingCard}>
+            <h2 style={styles.sidebarTitle}>Shipping Info</h2>
+            <input placeholder="Email *" type="email" value={shipping.email} onChange={e => updateField('email', e.target.value)} style={styles.input} />
+            <input placeholder="Full Name *" value={shipping.name} onChange={e => updateField('name', e.target.value)} style={styles.input} />
+            <input placeholder="Address Line 1 *" value={shipping.line1} onChange={e => updateField('line1', e.target.value)} style={styles.input} />
+            <input placeholder="Address Line 2" value={shipping.line2} onChange={e => updateField('line2', e.target.value)} style={styles.input} />
+            <div style={styles.inputRow}>
+              <input placeholder="City *" value={shipping.city} onChange={e => updateField('city', e.target.value)} style={{ ...styles.input, flex: 2 }} />
+              <input placeholder="Province/State *" value={shipping.state} onChange={e => updateField('state', e.target.value)} style={{ ...styles.input, flex: 1 }} />
+            </div>
+            <div style={styles.inputRow}>
+              <input placeholder="Postal/ZIP *" value={shipping.zip} onChange={e => updateField('zip', e.target.value)} style={{ ...styles.input, flex: 1 }} />
+              <select value={shipping.country} onChange={e => updateField('country', e.target.value)} style={{ ...styles.input, flex: 1 }}>
+                <option value="CA">Canada</option>
+                <option value="US">United States</option>
+              </select>
+            </div>
+          </div>
+
+          {(loadingRates || shippingRates) && (
+            <div style={styles.ratesCard}>
+              <h2 style={styles.sidebarTitle}>Shipping Method</h2>
+              {loadingRates ? (
+                <p style={styles.loadingText}>Calculating rates...</p>
+              ) : shippingRates?.rates?.length > 0 ? (
+                shippingRates.rates.map((rate, i) => (
+                  <label key={i} style={{
+                    ...styles.rateOption,
+                    ...(selectedRate?.service === rate.service ? styles.rateOptionActive : {}),
+                  }}>
+                    <input
+                      type="radio"
+                      name="shippingRate"
+                      checked={selectedRate?.service === rate.service}
+                      onChange={() => setSelectedRate(rate)}
+                      style={styles.rateRadio}
+                    />
+                    <div style={styles.rateInfo}>
+                      <span style={styles.rateName}>{rate.service}</span>
+                      {rate.description && (
+                        <span style={styles.rateDesc}>{rate.description}</span>
+                      )}
+                      {rate.deliveryDate && (
+                        <span style={styles.rateDelivery}>
+                          Est. {formatDeliveryDate(rate.deliveryDate)}
+                          {rate.deliveryDateLate ? ` – ${formatDeliveryDate(rate.deliveryDateLate)}` : ''}
+                        </span>
+                      )}
+                      {!rate.deliveryDate && rate.deliveryDays && (
+                        <span style={styles.rateDelivery}>~{rate.deliveryDays} business days</span>
+                      )}
+                    </div>
+                    <span style={styles.ratePrice}>${(rate.priceCents / 100).toFixed(2)}</span>
+                  </label>
+                ))
+              ) : (
+                <p style={styles.loadingText}>No rates available</p>
+              )}
+              {shippingRates?.source === 'estimate' && (
+                <p style={styles.estimateNote}>Estimated rates — final cost confirmed at checkout</p>
+              )}
+            </div>
+          )}
+
           <div style={styles.summaryCard}>
             <h2 style={styles.sidebarTitle}>Order Summary</h2>
             <div style={styles.summaryRow}>
               <span>Subtotal</span><span>${(subtotalCents / 100).toFixed(2)}</span>
             </div>
             <div style={styles.summaryRow}>
-              <span>Shipping</span><span>${(shippingCents / 100).toFixed(2)}</span>
+              <span>Shipping</span>
+              {hasAddress ? (
+                <span>${(shippingCents / 100).toFixed(2)}</span>
+              ) : (
+                <span style={styles.summaryPlaceholder}>Enter address</span>
+              )}
+            </div>
+            <div style={styles.summaryRow}>
+              <span>{taxRate ? `Tax (${taxRate.label})` : 'Tax'}</span>
+              {hasAddress ? (
+                <span>${(taxCents / 100).toFixed(2)}</span>
+              ) : (
+                <span style={styles.summaryPlaceholder}>Enter address</span>
+              )}
             </div>
             <div style={{ ...styles.summaryRow, ...styles.totalRow }}>
-              <span>Total</span><span>${(totalCents / 100).toFixed(2)}</span>
-            </div>
-          </div>
-
-          <div style={styles.shippingCard}>
-            <h2 style={styles.sidebarTitle}>Shipping Info</h2>
-            <input placeholder="Email *" value={shipping.email} onChange={e => updateField('email', e.target.value)} style={styles.input} />
-            <input placeholder="Full Name *" value={shipping.name} onChange={e => updateField('name', e.target.value)} style={styles.input} />
-            <input placeholder="Address Line 1 *" value={shipping.line1} onChange={e => updateField('line1', e.target.value)} style={styles.input} />
-            <input placeholder="Address Line 2" value={shipping.line2} onChange={e => updateField('line2', e.target.value)} style={styles.input} />
-            <div style={styles.inputRow}>
-              <input placeholder="City *" value={shipping.city} onChange={e => updateField('city', e.target.value)} style={{ ...styles.input, flex: 2 }} />
-              <input placeholder="State *" value={shipping.state} onChange={e => updateField('state', e.target.value)} style={{ ...styles.input, flex: 1 }} />
-            </div>
-            <div style={styles.inputRow}>
-              <input placeholder="ZIP *" value={shipping.zip} onChange={e => updateField('zip', e.target.value)} style={{ ...styles.input, flex: 1 }} />
-              <input placeholder="Country" value={shipping.country} onChange={e => updateField('country', e.target.value)} style={{ ...styles.input, flex: 1 }} />
+              <span>Total</span>
+              {hasAddress ? (
+                <span>${(totalCents / 100).toFixed(2)}</span>
+              ) : (
+                <span style={styles.summaryPlaceholder}>—</span>
+              )}
             </div>
           </div>
 
@@ -189,10 +307,17 @@ const styles = {
     background: 'var(--bg-card)', borderRadius: 'var(--radius-md)', padding: '1.25rem',
     boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border-light)', marginBottom: '0.75rem',
   },
+  ratesCard: {
+    background: 'var(--bg-card)', borderRadius: 'var(--radius-md)', padding: '1.25rem',
+    boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border-light)', marginBottom: '0.75rem',
+  },
   sidebarTitle: { fontSize: '1rem', fontWeight: 600, margin: '0 0 1rem' },
   summaryRow: {
     display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem',
     color: 'var(--text)', marginBottom: '0.5rem',
+  },
+  summaryPlaceholder: {
+    fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic',
   },
   totalRow: {
     borderTop: '1px solid var(--border-light)', paddingTop: '0.5rem', marginTop: '0.25rem',
@@ -205,6 +330,23 @@ const styles = {
   },
   inputRow: { display: 'flex', gap: '0.5rem' },
   error: { color: '#ef4444', fontSize: '0.85rem', marginBottom: '0.5rem' },
+  rateOption: {
+    display: 'flex', alignItems: 'center', gap: '0.6rem',
+    padding: '0.65rem 0.75rem', borderRadius: 'var(--radius-sm)',
+    border: '1.5px solid var(--border)', marginBottom: '0.4rem',
+    cursor: 'pointer', background: 'var(--bg-card)',
+  },
+  rateOptionActive: {
+    borderColor: 'var(--brand-purple)', background: 'rgba(124,58,237,0.04)',
+  },
+  rateRadio: { accentColor: 'var(--brand-purple)' },
+  rateInfo: { flex: 1, display: 'flex', flexDirection: 'column', gap: '0.15rem' },
+  rateName: { fontSize: '0.85rem', fontWeight: 500 },
+  rateDesc: { fontSize: '0.75rem', color: 'var(--text-muted)' },
+  rateDelivery: { fontSize: '0.75rem', color: 'var(--brand-green)' },
+  ratePrice: { fontSize: '0.9rem', fontWeight: 600, flexShrink: 0 },
+  loadingText: { fontSize: '0.85rem', color: 'var(--text-muted)', fontStyle: 'italic' },
+  estimateNote: { fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', fontStyle: 'italic' },
   checkoutBtn: {
     width: '100%', padding: '0.8rem', fontSize: '1rem', fontWeight: 600,
     color: '#fff', background: 'var(--gradient-btn)', border: 'none',
