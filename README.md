@@ -88,7 +88,7 @@ server/
 
 ## How It Works
 
-1. **Upload**: Open `/workspace` on your computer. A QR code appears. Scan it with your phone to open the phone capture page, then paste stickers from your keyboard. They sync to the desktop via WebSocket in real time. You can also drag-and-drop or upload files directly on desktop.
+1. **Upload**: Open `/workspace` on your computer. A QR code appears. Scan it with your phone to open the phone capture page, then paste stickers from your keyboard. They sync to the desktop via WebSocket in real time. You can also drag-and-drop or upload files directly on desktop. On mobile, a session link is shown so you can type it into a desktop browser to continue editing there.
 
 2. **Edit**: Click "Edit" on any sticker to open the editor. Remove backgrounds (runs an ML model in-browser), add outlines, choose cut shapes (contour/circle/square/rounded), and resize. On mobile the editor is simplified — full-screen with touch drag/resize and just the essential toggles.
 

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useParams } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import StickerGrid from '../components/StickerGrid.jsx';
 import EditModal from '../components/EditModal.jsx';
@@ -8,6 +9,7 @@ import { useWebSocket } from '../hooks/useWebSocket.js';
 import { useIsMobile } from '../hooks/useIsMobile.js';
 
 export default function DesktopPage() {
+  const { sessionId: urlSessionId } = useParams();
   const isMobile = useIsMobile();
   const [sessionId, setSessionId] = useState(null);
   const [stickers, setStickers] = useState([]);
@@ -23,13 +25,17 @@ export default function DesktopPage() {
 
   useEffect(() => {
     fetch('/api/host').then((r) => r.json()).then((d) => setLanHost(d));
-    const stored = sessionStorage.getItem('sticker_session');
-    if (stored) {
-      restoreSession(stored);
+    if (urlSessionId) {
+      restoreSession(urlSessionId);
     } else {
-      createSession();
+      const stored = sessionStorage.getItem('sticker_session');
+      if (stored) {
+        restoreSession(stored);
+      } else {
+        createSession();
+      }
     }
-  }, []);
+  }, [urlSessionId]);
 
   async function createSession() {
     const res = await fetch('/api/session', { method: 'POST' });
@@ -192,6 +198,10 @@ export default function DesktopPage() {
     ? `http://${lanHost.ip}:${window.location.port || lanHost.port}/phone/${sessionId}`
     : `${window.location.origin}/phone/${sessionId}`;
 
+  const desktopUrl = lanHost
+    ? `${lanHost.ip}:${window.location.port || lanHost.port}/workspace/${sessionId}`
+    : `${window.location.host}/workspace/${sessionId}`;
+
   return (
     <div style={styles.page}>
       {!isMobile && (
@@ -203,6 +213,10 @@ export default function DesktopPage() {
 
       {isMobile ? (
         <div style={styles.mobileUpload}>
+          <div style={styles.desktopLink}>
+            <p style={styles.desktopLinkText}>Continue editing on your computer:</p>
+            <code style={styles.desktopLinkCode}>{desktopUrl}</code>
+          </div>
           <div
             ref={pasteRef}
             contentEditable
@@ -393,6 +407,25 @@ const styles = {
   uploadHint: {
     fontSize: '0.75rem',
     color: 'var(--text-muted)',
+  },
+  desktopLink: {
+    background: 'var(--bg-card)',
+    border: '1px solid var(--border-light)',
+    borderRadius: 'var(--radius-md)',
+    padding: '0.75rem 1rem',
+    marginBottom: '1rem',
+    textAlign: 'center',
+  },
+  desktopLinkText: {
+    fontSize: '0.8rem',
+    color: 'var(--text-muted)',
+    marginBottom: '0.4rem',
+  },
+  desktopLinkCode: {
+    fontSize: '0.9rem',
+    fontWeight: 600,
+    color: 'var(--brand-purple)',
+    wordBreak: 'break-all',
   },
   mobileUpload: {
     marginBottom: '1.5rem',

@@ -24,6 +24,7 @@ createRoot(document.getElementById('root')).render(
               <Routes>
                 <Route path="/" element={<LandingPage />} />
                 <Route path="/workspace" element={<DesktopPage />} />
+                <Route path="/workspace/:sessionId" element={<DesktopPage />} />
                 <Route path="/cart" element={<CartPage />} />
                 <Route path="/order/:reference" element={<OrderConfirmationPage />} />
                 <Route path="/order-lookup" element={<OrderLookupPage />} />

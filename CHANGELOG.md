@@ -1,5 +1,8 @@
 # Changelog
 
+## 2026-07-18
+- Session link for mobile: shows desktop URL on phone so users can continue editing on their computer
+
 ## 2026-07-17
 - Server-side upload of edited sticker images via FormData (fixes checkout crash with bordered images)
 - Edited stickers saved as PNG to `orders-assets/` with 1500px max resize
