@@ -26,14 +26,14 @@ RESEND_API_KEY=re_...
 RESEND_FROM=orders@yourdomain.com
 ADMIN_PASSWORD=your-admin-password
 
-# Shippo (optional — falls back to format validation + flat-rate estimates without it)
+# Canada Post (optional — falls back to flat-rate estimates without it)
+CANADAPOST_API_KEY=your-client-id
+CANADAPOST_API_SECRET=your-client-secret
+CANADAPOST_CUSTOMER_NUMBER=0001234567
+CANADAPOST_ORIGIN_POSTAL=M5V1A1
+
+# Shippo (optional — address validation only)
 SHIPPO_API_TOKEN=shippo_test_...
-SHIPPO_ORIGIN_NAME=Print Me to Life
-SHIPPO_ORIGIN_STREET=123 Main St
-SHIPPO_ORIGIN_CITY=Toronto
-SHIPPO_ORIGIN_STATE=ON
-SHIPPO_ORIGIN_ZIP=M5V1A1
-SHIPPO_ORIGIN_COUNTRY=CA
 ```
 
 All are optional for local dev — features degrade gracefully (no payments, no emails, no admin, estimated shipping rates).
@@ -75,13 +75,14 @@ client/                     React SPA (Vite)
 server/
   index.js                  Express + WebSocket server, Stripe checkout/webhooks, image upload,
                             order API, admin API, Resend email integration
-  shipping.js               Shippo API integration — address validation, multi-carrier shipping
-                            rates, delivery estimates. Falls back to format checks + flat rates
+  shipping.js               Shipping integration — Canada Post API (OAuth + rating) for live
+                            Expedited Parcel rates, Shippo for address validation, lettermail
+                            estimates by postal code distance. Falls back to flat rates
   sessions.js               In-memory session store (phone-to-desktop pairing), 24h expiry
   db.js                     SQLite database for orders and order items (better-sqlite3)
   pricing.js                Sticker size/price definitions and shipping cost
   uploads/                  Uploaded sticker images (gitignored)
-  orders-assets/            Finalized sticker images saved at checkout (gitignored)
+  orders-assets/            Edited sticker images uploaded from the editor (gitignored)
   orders.db                 SQLite database file (auto-created, gitignored)
 ```
 
@@ -93,14 +94,15 @@ server/
 
 3. **Order**: Add stickers to cart (pick size + quantity), review in the slide-in cart drawer, then checkout via Stripe. After payment, a confirmation email is sent via Resend with the order reference.
 
-4. **Admin**: Go to `/admin` and log in with `ADMIN_PASSWORD`. View all orders, filter by status, update order status (processing/shipped/delivered).
+4. **Admin**: Go to `/admin` and log in with `ADMIN_PASSWORD`. View all orders, filter by status, update order status (processing/shipped/delivered). Download all sticker images for an order as a zip file.
 
 ## Key Technical Details
 
 - **Phone-to-desktop sync**: WebSocket-based. The server creates a session, phone uploads images to it, desktop receives them in real time.
 - **Background removal**: Runs entirely client-side using ONNX Runtime with the RMBG model (~40MB, loaded on demand).
 - **Contour tracing**: Generates bezier curve outlines around stickers for die-cut lines.
+- **Sticker editing**: Edited stickers (borders, cutouts, background removal) are uploaded as PNG to the server via FormData. Cart stores server URLs, avoiding localStorage size limits.
 - **Cart persistence**: Stored in localStorage so it survives page refreshes. Cleared on successful checkout.
-- **Shipping**: Shippo API for address validation, multi-carrier shipping rates (Canada Post, USPS, UPS, FedEx), and delivery estimates. Falls back to format validation + flat-rate estimates when `SHIPPO_API_TOKEN` isn't set.
+- **Shipping**: Canada Post API (OAuth 2.0) for live Expedited Parcel rates and delivery dates. Lettermail estimates calculated by postal code distance from Toronto. Shippo for address validation. Province-based Canadian tax calculation (HST/GST/PST/QST). Falls back to flat-rate estimates when API credentials aren't set.
 - **Payments**: Stripe Checkout Sessions with webhook for payment confirmation. Currency configurable via `STRIPE_CURRENCY`.
 - **Emails**: Order confirmation via Resend. Recipient emails are lowercased before sending (Resend is case-sensitive).

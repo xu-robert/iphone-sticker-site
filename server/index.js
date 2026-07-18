@@ -8,6 +8,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import os from 'os';
 import sharp from 'sharp';
+import { ZipArchive } from 'archiver';
 import Stripe from 'stripe';
 import { Resend } from 'resend';
 import { createSession, getSession, addSticker, removeSticker } from './sessions.js';
@@ -166,7 +167,7 @@ wss.on('connection', (ws, req) => {
 
 // --- REST API ---
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -221,12 +222,20 @@ async function handleUpload(req, res) {
   try {
     const image = sharp(buffer);
     const meta = await image.metadata();
+    const MAX_DIM = 1500;
+    const needsResize = meta.width > MAX_DIM || meta.height > MAX_DIM;
+
+    let pipeline = image;
+    if (needsResize) {
+      pipeline = pipeline.resize(MAX_DIM, MAX_DIM, { fit: 'inside', withoutEnlargement: true });
+    }
+    pipeline = pipeline.trim({ threshold: 10 });
 
     if (meta.hasAlpha) {
-      buffer = await image.trim({ threshold: 10 }).png().toBuffer();
+      buffer = await pipeline.png().toBuffer();
       ext = 'png';
     } else {
-      buffer = await image.trim({ threshold: 10 }).toBuffer();
+      buffer = await pipeline.toBuffer();
       const SUB_TO_EXT = { jpeg: 'jpg', 'x-png': 'png', svg: 'svg', 'svg+xml': 'svg' };
       const sub = req.file.mimetype.split('/')[1];
       ext = SUB_TO_EXT[sub] || sub;
@@ -281,7 +290,15 @@ app.get('/api/pricing', (req, res) => {
   });
 });
 
-app.post('/api/cart/finalize-image', express.json({ limit: '20mb' }), (req, res) => {
+app.post('/api/upload-edited', upload.single('image'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No image provided' });
+  const ext = req.file.mimetype === 'image/webp' ? 'webp' : req.file.mimetype === 'image/png' ? 'png' : 'jpg';
+  const filename = `${crypto.randomUUID()}.${ext}`;
+  fs.writeFileSync(path.join(ORDERS_ASSETS_DIR, filename), req.file.buffer);
+  res.json({ url: `/orders-assets/${filename}` });
+});
+
+app.post('/api/cart/finalize-image', express.json({ limit: '50mb' }), (req, res) => {
   const { dataUrl } = req.body;
   if (!dataUrl || !dataUrl.startsWith('data:image/')) {
     return res.status(400).json({ error: 'Invalid image data' });
@@ -412,8 +429,10 @@ const adminTokens = new Set();
 const VALID_STATUSES = ['pending', 'paid', 'processing', 'shipped', 'cancelled'];
 
 function requireAdmin(req, res, next) {
-  const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Bearer ') || !adminTokens.has(auth.slice(7))) {
+  const token = req.headers.authorization?.startsWith('Bearer ')
+    ? req.headers.authorization.slice(7)
+    : req.query.token;
+  if (!token || !adminTokens.has(token)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   next();
@@ -435,6 +454,26 @@ app.get('/api/admin/orders', requireAdmin, (req, res) => {
     return res.status(400).json({ error: 'Invalid status filter' });
   }
   res.json(getAllOrders(status));
+});
+
+app.get('/api/admin/orders/:reference/download', requireAdmin, (req, res) => {
+  const order = getOrderByReference(req.params.reference);
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+
+  const archive = new ZipArchive();
+  res.set('Content-Type', 'application/zip');
+  res.set('Content-Disposition', `attachment; filename="${order.reference}-stickers.zip"`);
+  archive.pipe(res);
+
+  order.items.forEach((item, i) => {
+    const filePath = path.join(import.meta.dirname, item.image_url.replace(/^\//, ''));
+    if (fs.existsSync(filePath)) {
+      const ext = path.extname(item.image_url);
+      archive.file(filePath, { name: `${i + 1}-${item.size_label}-x${item.quantity}${ext}` });
+    }
+  });
+
+  archive.finalize();
 });
 
 app.patch('/api/admin/orders/:reference', requireAdmin, (req, res) => {

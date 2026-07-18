@@ -5,40 +5,16 @@ export default function AddToCartModal({ sticker, onClose }) {
   const { pricing, addItem, openDrawer } = useCart();
   const [sizeValue, setSizeValue] = useState('3in');
   const [quantity, setQuantity] = useState(1);
-  const [finalizing, setFinalizing] = useState(false);
-
   if (!pricing) return null;
 
   const size = pricing.sizes.find(s => s.value === sizeValue);
   const totalCents = size ? size.priceCents * quantity : 0;
   const displayUrl = sticker.displayUrl || sticker.imageUrl;
 
-  const handleAdd = async () => {
-    setFinalizing(true);
-    try {
-      let imageUrl;
-      if (displayUrl.startsWith('data:')) {
-        const res = await fetch('/api/cart/finalize-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dataUrl: displayUrl }),
-        });
-        if (res.ok) {
-          imageUrl = (await res.json()).imageUrl;
-        } else {
-          imageUrl = displayUrl;
-        }
-      } else {
-        imageUrl = displayUrl;
-      }
-      addItem(imageUrl, displayUrl, sizeValue, quantity);
-      onClose();
-      openDrawer();
-    } catch {
-      addItem(displayUrl, displayUrl, sizeValue, quantity);
-      onClose();
-      openDrawer();
-    }
+  const handleAdd = () => {
+    addItem(displayUrl, displayUrl, sizeValue, quantity);
+    onClose();
+    openDrawer();
   };
 
   return (
@@ -83,8 +59,8 @@ export default function AddToCartModal({ sticker, onClose }) {
 
         <div style={styles.footer}>
           <button onClick={onClose} style={styles.cancelBtn}>Cancel</button>
-          <button onClick={handleAdd} disabled={finalizing} style={styles.addBtn}>
-            {finalizing ? 'Adding...' : 'Add to Cart'}
+          <button onClick={handleAdd} style={styles.addBtn}>
+            Add to Cart
           </button>
         </div>
       </div>

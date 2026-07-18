@@ -265,7 +265,7 @@ function renderFinal(img, cutType, cutBgColor, shapeWidthPx, shapeHeightPx, stic
   }
 
   ctx.drawImage(img, pad + stickerOffsetX - minX, pad + stickerOffsetY - minY);
-  return canvas.toDataURL('image/png');
+  return canvas;
 }
 
 export default function EditModal({ sticker, onSave, onCancel }) {
@@ -416,7 +416,9 @@ export default function EditModal({ sticker, onSave, onCancel }) {
     }));
   }
 
-  const handleSave = useCallback(() => {
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = useCallback(async () => {
     const displayW = formatDim(inchesToUnit(stickerWidthIn, unit));
     const displayH = formatDim(inchesToUnit(stickerHeightIn, unit));
     const settings = {
@@ -428,7 +430,7 @@ export default function EditModal({ sticker, onSave, onCancel }) {
     if (!img) { onSave(sticker, settings); return; }
 
     const nativeScale = effectiveDpi / pxPerInch;
-    let processedUrl;
+    let canvas;
     if (cutType === 'contour') {
       if (outlineEnabled && traceResult && traceResult.segments.length > 0) {
         const nativeSegments = scaleSegments(traceResult.segments, nativeScale);
@@ -440,17 +442,38 @@ export default function EditModal({ sticker, onSave, onCancel }) {
         drawBezierPath(ctx, nativeSegments);
         ctx.fillStyle = outlineColor; ctx.fill(); ctx.restore();
         ctx.drawImage(img, pad, pad);
-        processedUrl = c.toDataURL('image/png');
-      } else {
-        processedUrl = activeImageUrl;
+        canvas = c;
       }
     } else {
       const nativeTrace = outlineEnabled && traceResult && traceResult.segments.length > 0
         ? { segments: scaleSegments(traceResult.segments, nativeScale), svgPath: '' }
         : null;
-      processedUrl = renderFinal(img, cutType, cutBgColor, shapeWidthImgPx, shapeHeightImgPx, stickerOffsetXImgPx, stickerOffsetYImgPx, outlineEnabled, outlineColor, outlineThicknessPx, nativeTrace);
+      canvas = renderFinal(img, cutType, cutBgColor, shapeWidthImgPx, shapeHeightImgPx, stickerOffsetXImgPx, stickerOffsetYImgPx, outlineEnabled, outlineColor, outlineThicknessPx, nativeTrace);
     }
-    onSave(sticker, { ...settings, processedImageUrl: processedUrl });
+
+    if (canvas) {
+      setSaving(true);
+      try {
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        const form = new FormData();
+        form.append('image', blob, 'sticker.png');
+        const res = await fetch('/api/upload-edited', { method: 'POST', body: form });
+        if (res.ok) {
+          const { url } = await res.json();
+          onSave(sticker, { ...settings, processedImageUrl: url });
+        } else {
+          console.error('Upload edited image failed:', res.status);
+          onSave(sticker, settings);
+        }
+      } catch (err) {
+        console.error('Upload edited image error:', err);
+        onSave(sticker, settings);
+      } finally {
+        setSaving(false);
+      }
+    } else {
+      onSave(sticker, { ...settings, processedImageUrl: activeImageUrl });
+    }
   }, [sticker, onSave, img, outlineEnabled, outlineColor, outlineThickness, outlineThicknessPx, effectiveDpi, pxPerInch, unit, stickerWidthIn, stickerHeightIn, bgRemovalEnabled, bgRemovedUrl, activeImageUrl, cutType, cutBgColor, shapeWidthIn, shapeWidthImgPx, shapeHeightImgPx, stickerOffsetXImgPx, stickerOffsetYImgPx, traceResult]);
 
   const unitLabel = unit === 'cm' ? 'cm' : '"';
@@ -473,7 +496,7 @@ export default function EditModal({ sticker, onSave, onCancel }) {
           <div style={styles.mobileHeader}>
             <button onClick={onCancel} style={styles.mobileHeaderBtn}>Cancel</button>
             <h2 style={styles.mobileHeaderTitle}>Edit Sticker</h2>
-            <button onClick={handleSave} style={styles.mobileHeaderSave}>Save</button>
+            <button onClick={handleSave} disabled={saving} style={styles.mobileHeaderSave}>{saving ? 'Saving...' : 'Save'}</button>
           </div>
 
           <div style={styles.mobileWorkspaceWrap}>
@@ -743,7 +766,7 @@ export default function EditModal({ sticker, onSave, onCancel }) {
 
         <div style={styles.footer}>
           <button onClick={onCancel} style={styles.cancelBtn}>Cancel</button>
-          <button onClick={handleSave} style={styles.saveBtn}>Save</button>
+          <button onClick={handleSave} disabled={saving} style={styles.saveBtn}>{saving ? 'Saving...' : 'Save'}</button>
         </div>
       </div>
     </div>

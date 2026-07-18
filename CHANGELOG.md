@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-07-17
+- Server-side upload of edited sticker images via FormData (fixes checkout crash with bordered images)
+- Edited stickers saved as PNG to `orders-assets/` with 1500px max resize
+- Simplified add-to-cart flow — cart stores server URLs instead of data URLs
+- Admin "Download All" button to download order sticker images as a zip file
+- Image upload resize: cap longest side at 1500px (300 DPI at max 5" sticker)
+
 ## 2026-07-15
 - "Print Me to Life" branding, landing page with hero, how-it-works, pricing, and CTA sections
 - Shared nav bar with sticky header and cart badge

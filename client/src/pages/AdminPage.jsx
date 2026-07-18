@@ -93,7 +93,13 @@ function OrderRow({ order, onStatusChange }) {
       {expanded && (
         <div style={styles.orderBody}>
           <div style={styles.detailSection}>
-            <h4 style={styles.detailTitle}>Items</h4>
+            <div style={styles.itemsHeader}>
+              <h4 style={styles.detailTitle}>Items</h4>
+              <button onClick={() => {
+                const token = sessionStorage.getItem('admin_token');
+                window.open(`/api/admin/orders/${order.reference}/download?token=${token}`);
+              }} style={styles.downloadBtn}>Download All</button>
+            </div>
             {order.items.map((item, i) => (
               <div key={i} style={styles.itemRow}>
                 <div style={styles.itemThumb}>
@@ -278,6 +284,12 @@ const styles = {
   detailTitle: {
     fontSize: '0.75rem', fontWeight: 600, color: '#86868b',
     textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 0.5rem',
+  },
+  itemsHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' },
+  downloadBtn: {
+    padding: '0.25rem 0.6rem', borderRadius: 6, fontSize: '0.75rem',
+    fontWeight: 500, cursor: 'pointer', border: '1.5px solid #007aff',
+    background: '#fff', color: '#007aff',
   },
   itemRow: { display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem', fontSize: '0.9rem' },
   itemThumb: {
