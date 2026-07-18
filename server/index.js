@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
+import rateLimit from 'express-rate-limit';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -26,6 +27,7 @@ fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 fs.mkdirSync(ORDERS_ASSETS_DIR, { recursive: true });
 
 const app = express();
+app.set('trust proxy', 1);
 const server = createServer(app);
 
 // Stripe webhook must be registered before express.json() — needs raw body
@@ -177,6 +179,13 @@ const upload = multer({
   },
 });
 
+const uploadLimiter = rateLimit({ windowMs: 60_000, max: 20, message: { error: 'Too many uploads, try again in a minute' } });
+const sessionLimiter = rateLimit({ windowMs: 60_000, max: 10, message: { error: 'Too many sessions created, try again in a minute' } });
+const checkoutLimiter = rateLimit({ windowMs: 60_000, max: 5, message: { error: 'Too many checkout attempts, try again in a minute' } });
+const authLimiter = rateLimit({ windowMs: 15 * 60_000, max: 10, message: { error: 'Too many login attempts, try again later' } });
+const apiLimiter = rateLimit({ windowMs: 60_000, max: 30, message: { error: 'Too many requests, try again in a minute' } });
+const lookupLimiter = rateLimit({ windowMs: 60_000, max: 20, message: { error: 'Too many lookup attempts, try again in a minute' } });
+
 function getLanIp() {
   for (const ifaces of Object.values(os.networkInterfaces())) {
     for (const iface of ifaces) {
@@ -190,7 +199,7 @@ app.get('/api/host', (req, res) => {
   res.json({ ip: getLanIp(), port: PORT });
 });
 
-app.post('/api/session', (req, res) => {
+app.post('/api/session', sessionLimiter, (req, res) => {
   const id = createSession();
   res.json({ sessionId: id });
 });
@@ -201,7 +210,7 @@ app.get('/api/session/:id', (req, res) => {
   res.json({ sessionId: session.id, stickers: session.stickers });
 });
 
-app.post('/api/session/:id/upload', (req, res) => {
+app.post('/api/session/:id/upload', uploadLimiter, (req, res) => {
   upload.single('sticker')(req, res, (err) => {
     if (err) {
       console.error('Upload error:', err.message);
@@ -290,7 +299,7 @@ app.get('/api/pricing', (req, res) => {
   });
 });
 
-app.post('/api/upload-edited', upload.single('image'), (req, res) => {
+app.post('/api/upload-edited', uploadLimiter, upload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No image provided' });
   const ext = req.file.mimetype === 'image/webp' ? 'webp' : req.file.mimetype === 'image/png' ? 'png' : 'jpg';
   const filename = `${crypto.randomUUID()}.${ext}`;
@@ -312,21 +321,21 @@ app.post('/api/cart/finalize-image', express.json({ limit: '50mb' }), (req, res)
   res.json({ imageUrl: `/orders-assets/${filename}` });
 });
 
-app.post('/api/address/validate', async (req, res) => {
+app.post('/api/address/validate', apiLimiter, async (req, res) => {
   const { address } = req.body;
   if (!address) return res.status(400).json({ error: 'Address required' });
   const result = await validateAddress(address);
   res.json(result);
 });
 
-app.post('/api/shipping/rates', async (req, res) => {
+app.post('/api/shipping/rates', apiLimiter, async (req, res) => {
   const { postalCode, country } = req.body;
   if (!postalCode) return res.status(400).json({ error: 'Postal code required' });
   const result = await getShippingRates(postalCode, country || 'CA');
   res.json(result);
 });
 
-app.post('/api/checkout', async (req, res) => {
+app.post('/api/checkout', checkoutLimiter, async (req, res) => {
   if (!stripe) return res.status(500).json({ error: 'Stripe not configured' });
   const { items, shipping, shippingRateCents } = req.body;
   if (!items?.length || !shipping?.email || !shipping?.name || !shipping?.line1 || !shipping?.city || !shipping?.state || !shipping?.zip) {
@@ -415,7 +424,7 @@ app.get('/api/order/:reference', (req, res) => {
   res.json(order);
 });
 
-app.post('/api/order/lookup', (req, res) => {
+app.post('/api/order/lookup', lookupLimiter, (req, res) => {
   const { reference, email } = req.body;
   if (!reference || !email) return res.status(400).json({ error: 'Reference and email required' });
   const order = getOrderByReferenceAndEmail(reference.toUpperCase(), email.toLowerCase());
@@ -438,7 +447,7 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-app.post('/api/admin/login', (req, res) => {
+app.post('/api/admin/login', authLimiter, (req, res) => {
   const { password } = req.body;
   if (!process.env.ADMIN_PASSWORD || password !== process.env.ADMIN_PASSWORD) {
     return res.status(401).json({ error: 'Invalid password' });
