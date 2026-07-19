@@ -206,8 +206,15 @@ async function fetchCPExpeditedRate(destPostalCode) {
   }
 }
 
+const ratesCache = new Map();
+const RATES_CACHE_TTL = 10 * 60_000;
+
 export async function getShippingRates(destPostalCode, destCountry) {
   const country = (destCountry || 'CA').toUpperCase();
+  const cacheKey = `${(destPostalCode || '').replace(/\s/g, '').toUpperCase()}_${country}`;
+  const cached = ratesCache.get(cacheKey);
+  if (cached && Date.now() < cached.expiresAt) return cached.data;
+
   const domestic = country === 'CA';
 
   if (domestic) {
@@ -270,10 +277,12 @@ export async function getShippingRates(destPostalCode, destCountry) {
       }
     }
 
-    return { source: tracked.serviceCode ? 'canadapost' : 'estimate', rates: [lettermail, tracked] };
+    const domesticResult = { source: tracked.serviceCode ? 'canadapost' : 'estimate', rates: [lettermail, tracked] };
+    ratesCache.set(cacheKey, { data: domesticResult, expiresAt: Date.now() + RATES_CACHE_TTL });
+    return domesticResult;
   }
 
-  return {
+  const intlResult = {
     source: 'estimate',
     rates: [{
       service: 'International Shipping',
@@ -287,6 +296,8 @@ export async function getShippingRates(destPostalCode, destCountry) {
       deliveryDays: country === 'US' ? 10 : 15,
     }],
   };
+  ratesCache.set(cacheKey, { data: intlResult, expiresAt: Date.now() + RATES_CACHE_TTL });
+  return intlResult;
 }
 
 function estimateDate(daysFromNow) {

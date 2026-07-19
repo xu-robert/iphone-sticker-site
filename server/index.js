@@ -221,6 +221,7 @@ app.post('/api/session/:id/upload', uploadLimiter, (req, res) => {
 });
 
 async function handleUpload(req, res) {
+  if (!SAFE_SESSION_ID.test(req.params.id)) return res.status(400).json({ error: 'Invalid session ID' });
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: 'Session not found or expired' });
   if (!req.file) return res.status(400).json({ error: 'No image provided' });
@@ -250,9 +251,7 @@ async function handleUpload(req, res) {
       ext = SUB_TO_EXT[sub] || sub;
     }
   } catch {
-    const SUB_TO_EXT = { jpeg: 'jpg', 'x-png': 'png', svg: 'svg', 'svg+xml': 'svg' };
-    const sub = req.file.mimetype.split('/')[1];
-    ext = SUB_TO_EXT[sub] || sub;
+    return res.status(400).json({ error: 'Invalid image file' });
   }
 
   const filename = `${crypto.randomUUID()}.${ext}`;
@@ -271,8 +270,13 @@ async function handleUpload(req, res) {
   res.json(sticker);
 }
 
+const SAFE_FILENAME = /^[a-f0-9-]+\.(png|jpg|jpeg|webp|svg)$/;
+const SAFE_SESSION_ID = /^[a-hj-np-z2-9]{4}$/;
+
 app.delete('/api/session/:id/sticker/:filename', (req, res) => {
   const { id, filename } = req.params;
+  if (!SAFE_SESSION_ID.test(id)) return res.status(400).json({ error: 'Invalid session ID' });
+  if (!SAFE_FILENAME.test(filename)) return res.status(400).json({ error: 'Invalid filename' });
   const session = getSession(id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
   if (!removeSticker(id, filename)) return res.status(404).json({ error: 'Sticker not found' });
@@ -299,11 +303,17 @@ app.get('/api/pricing', (req, res) => {
   });
 });
 
-app.post('/api/upload-edited', uploadLimiter, upload.single('image'), (req, res) => {
+app.post('/api/upload-edited', uploadLimiter, upload.single('image'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No image provided' });
-  const ext = req.file.mimetype === 'image/webp' ? 'webp' : req.file.mimetype === 'image/png' ? 'png' : 'jpg';
-  const filename = `${crypto.randomUUID()}.${ext}`;
-  fs.writeFileSync(path.join(ORDERS_ASSETS_DIR, filename), req.file.buffer);
+  let buffer;
+  try {
+    const meta = await sharp(req.file.buffer).metadata();
+    buffer = await sharp(req.file.buffer).png().toBuffer();
+  } catch {
+    return res.status(400).json({ error: 'Invalid image file' });
+  }
+  const filename = `${crypto.randomUUID()}.png`;
+  fs.writeFileSync(path.join(ORDERS_ASSETS_DIR, filename), buffer);
   res.json({ url: `/orders-assets/${filename}` });
 });
 
@@ -337,14 +347,24 @@ app.post('/api/shipping/rates', apiLimiter, async (req, res) => {
 
 app.post('/api/checkout', checkoutLimiter, async (req, res) => {
   if (!stripe) return res.status(500).json({ error: 'Stripe not configured' });
-  const { items, shipping, shippingRateCents } = req.body;
+  const { items, shipping, shippingService } = req.body;
   if (!items?.length || !shipping?.email || !shipping?.name || !shipping?.line1 || !shipping?.city || !shipping?.state || !shipping?.zip) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
+  if (shipping.email.length > 254 || shipping.name.length > 200 || shipping.line1.length > 200 ||
+      (shipping.line2 && shipping.line2.length > 200) || shipping.city.length > 200 ||
+      shipping.state.length > 50 || shipping.zip.length > 20 ||
+      (shipping.country && shipping.country.length > 2)) {
+    return res.status(400).json({ error: 'Field too long' });
+  }
 
+  const SAFE_IMAGE_URL = /^\/(uploads\/[a-z0-9]{4}\/[a-f0-9-]+\.\w{2,4}|orders-assets\/[a-f0-9-]+\.\w{2,4})$/;
   let subtotalCents = 0;
   const validatedItems = [];
   for (const item of items) {
+    if (!item.imageUrl || !SAFE_IMAGE_URL.test(item.imageUrl)) {
+      return res.status(400).json({ error: 'Invalid image URL' });
+    }
     const size = getSize(item.sizeValue);
     if (!size) return res.status(400).json({ error: `Invalid size: ${item.sizeValue}` });
     const qty = Math.max(1, Math.floor(item.quantity));
@@ -352,7 +372,12 @@ app.post('/api/checkout', checkoutLimiter, async (req, res) => {
     validatedItems.push({ ...size, quantity: qty, imageUrl: item.imageUrl });
   }
 
-  const appliedShipping = typeof shippingRateCents === 'number' && shippingRateCents > 0 ? shippingRateCents : SHIPPING_FLAT_CENTS;
+  let appliedShipping = SHIPPING_FLAT_CENTS;
+  if (shippingService && shipping.zip) {
+    const rateResult = await getShippingRates(shipping.zip, shipping.country || 'CA');
+    const matched = rateResult.rates?.find(r => r.service === shippingService);
+    if (matched) appliedShipping = matched.priceCents;
+  }
   const taxInfo = getTaxRate(shipping.state, shipping.country);
   const taxableCents = subtotalCents + appliedShipping;
   const taxCents = taxInfo ? Math.round(taxableCents * taxInfo.rate) : 0;

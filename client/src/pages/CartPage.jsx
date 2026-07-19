@@ -78,7 +78,7 @@ export default function CartPage() {
         body: JSON.stringify({
           items: items.map(i => ({ imageUrl: i.imageUrl, sizeValue: i.sizeValue, quantity: i.quantity })),
           shipping,
-          shippingRateCents: selectedRate?.priceCents || null,
+          shippingService: selectedRate?.service || null,
           origin: window.location.origin,
         }),
       });
