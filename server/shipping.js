@@ -34,6 +34,7 @@ async function getCPAuth() {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: 'scope=merchant&grant_type=client_credentials',
+      signal: AbortSignal.timeout(5000),
     });
 
     if (!res.ok) {
@@ -145,13 +146,25 @@ function formatValidation(address) {
 
 // --- Shipping rates ---
 
-const ONTARIO_FSA = new Set(['K', 'L', 'M', 'N', 'P']);
 const PROCESSING_DAYS = 5;
+
+export const TRACKED_RATES = {
+  M: { priceCents: 2000, description: 'Local courier — Toronto', days: 6 },
+  L: { priceCents: 1499, description: 'Canada Post Expedited — Ontario', days: 7 },
+  K: { priceCents: 1499, description: 'Canada Post Expedited — Ontario', days: 8 },
+  N: { priceCents: 1499, description: 'Canada Post Expedited — Ontario', days: 8 },
+  P: { priceCents: 1699, description: 'Canada Post Expedited — Northern Ontario', days: 9 },
+  H: { priceCents: 1499, description: 'Canada Post Expedited — Quebec', days: 7 },
+  J: { priceCents: 1499, description: 'Canada Post Expedited — Quebec', days: 7 },
+  G: { priceCents: 1699, description: 'Canada Post Expedited — Quebec', days: 8 },
+};
+export const TRACKED_DEFAULT = { priceCents: 2399, description: 'Canada Post Expedited Parcel', days: 10 };
 
 function getLetterMailTransit(destPostalCode) {
   const fsa = (destPostalCode || '').replace(/\s/g, '').charAt(0).toUpperCase();
   if (fsa === 'M') return 2;
-  if (ONTARIO_FSA.has(fsa)) return 3;
+  if ('KLNP'.includes(fsa)) return 3;
+  if ('HJG'.includes(fsa)) return 3;
   return 4;
 }
 
@@ -184,6 +197,7 @@ async function fetchCPExpeditedRate(destPostalCode) {
         'Accept-Language': 'en-CA',
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5000),
     });
 
     if (!res.ok) {
@@ -209,6 +223,13 @@ async function fetchCPExpeditedRate(destPostalCode) {
 const ratesCache = new Map();
 const RATES_CACHE_TTL = 10 * 60_000;
 
+export function getCachedRate(destPostalCode, destCountry, serviceName) {
+  const cacheKey = `${(destPostalCode || '').replace(/\s/g, '').toUpperCase()}_${(destCountry || 'CA').toUpperCase()}`;
+  const cached = ratesCache.get(cacheKey);
+  if (!cached || Date.now() > cached.expiresAt) return null;
+  return cached.data.rates?.find(r => r.service === serviceName) || null;
+}
+
 export async function getShippingRates(destPostalCode, destCountry) {
   const country = (destCountry || 'CA').toUpperCase();
   const cacheKey = `${(destPostalCode || '').replace(/\s/g, '').toUpperCase()}_${country}`;
@@ -218,9 +239,10 @@ export async function getShippingRates(destPostalCode, destCountry) {
   const domestic = country === 'CA';
 
   if (domestic) {
+    const fsa = (destPostalCode || '').replace(/\s/g, '').charAt(0).toUpperCase();
     const transit = getLetterMailTransit(destPostalCode);
     const totalDays = PROCESSING_DAYS + transit;
-    const isLocal = transit === 2;
+    const zone = TRACKED_RATES[fsa] || TRACKED_DEFAULT;
 
     const lettermail = {
       service: 'Standard Shipping',
@@ -234,47 +256,35 @@ export async function getShippingRates(destPostalCode, destCountry) {
       deliveryDays: totalDays,
     };
 
-    let tracked;
-    if (isLocal) {
+    let tracked = {
+      service: 'Tracked Shipping',
+      description: zone.description,
+      serviceCode: null,
+      carrier: 'Canada Post',
+      priceCents: zone.priceCents,
+      currency: 'cad',
+      deliveryDate: estimateDate(PROCESSING_DAYS + zone.days),
+      deliveryDateLate: estimateDate(PROCESSING_DAYS + zone.days + 2),
+      deliveryDays: PROCESSING_DAYS + zone.days,
+    };
+
+    const cpRate = await Promise.race([
+      fetchCPExpeditedRate(destPostalCode),
+      new Promise(resolve => setTimeout(() => resolve(null), 5000)),
+    ]);
+    if (cpRate) {
+      const days = PROCESSING_DAYS + (cpRate.deliveryDays || zone.days);
       tracked = {
         service: 'Tracked Shipping',
-        description: 'Same-day courier — local Toronto',
-        serviceCode: null,
-        carrier: 'Local Courier',
-        priceCents: 2000,
+        description: 'Canada Post Expedited Parcel',
+        serviceCode: 'DOM.EP',
+        carrier: 'Canada Post',
+        priceCents: cpRate.priceCents,
         currency: 'cad',
-        deliveryDate: estimateDate(6),
-        deliveryDateLate: estimateDate(7),
-        deliveryDays: 6,
+        deliveryDate: cpRate.deliveryDate || estimateDate(days),
+        deliveryDateLate: estimateDate(days + 2),
+        deliveryDays: days,
       };
-    } else {
-      const cpRate = await fetchCPExpeditedRate(destPostalCode);
-      if (cpRate) {
-        const days = PROCESSING_DAYS + (cpRate.deliveryDays || 7);
-        tracked = {
-          service: 'Tracked Shipping',
-          description: 'Canada Post Expedited Parcel',
-          serviceCode: 'DOM.EP',
-          carrier: 'Canada Post',
-          priceCents: cpRate.priceCents,
-          currency: 'cad',
-          deliveryDate: cpRate.deliveryDate || estimateDate(days),
-          deliveryDateLate: estimateDate(days + 2),
-          deliveryDays: days,
-        };
-      } else {
-        tracked = {
-          service: 'Tracked Shipping',
-          description: 'Canada Post Tracked Packet',
-          serviceCode: null,
-          carrier: 'Canada Post',
-          priceCents: 2299,
-          currency: 'cad',
-          deliveryDate: estimateDate(12),
-          deliveryDateLate: estimateDate(14),
-          deliveryDays: 12,
-        };
-      }
     }
 
     const domesticResult = { source: tracked.serviceCode ? 'canadapost' : 'estimate', rates: [lettermail, tracked] };

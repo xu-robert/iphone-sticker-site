@@ -15,7 +15,7 @@ import { Resend } from 'resend';
 import { createSession, getSession, addSticker, removeSticker } from './sessions.js';
 import { createOrder, createOrderItem, updateOrderStripeSession, markOrderPaid, getOrderByReference, getOrderByReferenceAndEmail, getAllOrders, updateOrderStatus } from './db.js';
 import { SIZES, SHIPPING_FLAT_CENTS, TAX_RATES, getTaxRate, getSize } from './pricing.js';
-import { isConfigured as isShippingConfigured, validateAddress, getShippingRates } from './shipping.js';
+import { isConfigured as isShippingConfigured, validateAddress, getShippingRates, getCachedRate, TRACKED_RATES, TRACKED_DEFAULT } from './shipping.js';
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
@@ -241,6 +241,7 @@ async function handleUpload(req, res) {
     }
     pipeline = pipeline.trim({ threshold: 10 });
 
+    const ALLOWED_EXT = new Set(['png', 'jpg', 'jpeg', 'webp', 'svg']);
     if (meta.hasAlpha) {
       buffer = await pipeline.png().toBuffer();
       ext = 'png';
@@ -249,6 +250,7 @@ async function handleUpload(req, res) {
       const SUB_TO_EXT = { jpeg: 'jpg', 'x-png': 'png', svg: 'svg', 'svg+xml': 'svg' };
       const sub = req.file.mimetype.split('/')[1];
       ext = SUB_TO_EXT[sub] || sub;
+      if (!ALLOWED_EXT.has(ext)) ext = 'png';
     }
   } catch {
     return res.status(400).json({ error: 'Invalid image file' });
@@ -374,9 +376,13 @@ app.post('/api/checkout', checkoutLimiter, async (req, res) => {
 
   let appliedShipping = SHIPPING_FLAT_CENTS;
   if (shippingService && shipping.zip) {
-    const rateResult = await getShippingRates(shipping.zip, shipping.country || 'CA');
-    const matched = rateResult.rates?.find(r => r.service === shippingService);
-    if (matched) appliedShipping = matched.priceCents;
+    const matched = getCachedRate(shipping.zip, shipping.country || 'CA', shippingService);
+    if (matched) {
+      appliedShipping = matched.priceCents;
+    } else if (shippingService === 'Tracked Shipping') {
+      const fsa = shipping.zip.replace(/\s/g, '').charAt(0).toUpperCase();
+      appliedShipping = (TRACKED_RATES[fsa] || TRACKED_DEFAULT).priceCents;
+    }
   }
   const taxInfo = getTaxRate(shipping.state, shipping.country);
   const taxableCents = subtotalCents + appliedShipping;
@@ -459,7 +465,8 @@ app.post('/api/order/lookup', lookupLimiter, (req, res) => {
 
 // --- Admin ---
 
-const adminTokens = new Set();
+const adminTokens = new Map();
+const ADMIN_TOKEN_TTL = 24 * 60 * 60_000;
 const VALID_STATUSES = ['pending', 'paid', 'processing', 'shipped', 'cancelled'];
 
 function requireAdmin(req, res, next) {
@@ -468,6 +475,10 @@ function requireAdmin(req, res, next) {
     : req.query.token;
   if (!token || !adminTokens.has(token)) {
     return res.status(401).json({ error: 'Unauthorized' });
+  }
+  if (Date.now() > adminTokens.get(token)) {
+    adminTokens.delete(token);
+    return res.status(401).json({ error: 'Session expired' });
   }
   next();
 }
@@ -478,7 +489,7 @@ app.post('/api/admin/login', authLimiter, (req, res) => {
     return res.status(401).json({ error: 'Invalid password' });
   }
   const token = crypto.randomBytes(32).toString('hex');
-  adminTokens.add(token);
+  adminTokens.set(token, Date.now() + ADMIN_TOKEN_TTL);
   res.json({ token });
 });
 
