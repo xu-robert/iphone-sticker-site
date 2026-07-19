@@ -95,9 +95,16 @@ function OrderRow({ order, onStatusChange }) {
           <div style={styles.detailSection}>
             <div style={styles.itemsHeader}>
               <h4 style={styles.detailTitle}>Items</h4>
-              <button onClick={() => {
-                const token = sessionStorage.getItem('admin_token');
-                window.open(`/api/admin/orders/${order.reference}/download?token=${token}`);
+              <button onClick={async () => {
+                const res = await api(`/api/admin/orders/${order.reference}/download`);
+                if (!res.ok) return;
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${order.reference}-stickers.zip`;
+                a.click();
+                URL.revokeObjectURL(url);
               }} style={styles.downloadBtn}>Download All</button>
             </div>
             {order.items.map((item, i) => (

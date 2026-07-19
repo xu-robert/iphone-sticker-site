@@ -44,8 +44,10 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     console.log(`Payment completed for order: ${session.metadata?.order_reference}, session: ${session.id}`);
+    const existing = session.metadata?.order_reference ? getOrderByReference(session.metadata.order_reference) : null;
+    const alreadyPaid = existing?.status === 'paid';
     markOrderPaid(session.id, session.payment_intent);
-    if (session.metadata?.order_reference) {
+    if (session.metadata?.order_reference && !alreadyPaid) {
       const order = getOrderByReference(session.metadata.order_reference);
       if (order) {
         console.log(`Sending confirmation email to ${order.email} for ${order.reference}`);
@@ -319,19 +321,6 @@ app.post('/api/upload-edited', uploadLimiter, upload.single('image'), async (req
   res.json({ url: `/orders-assets/${filename}` });
 });
 
-app.post('/api/cart/finalize-image', express.json({ limit: '50mb' }), (req, res) => {
-  const { dataUrl } = req.body;
-  if (!dataUrl || !dataUrl.startsWith('data:image/')) {
-    return res.status(400).json({ error: 'Invalid image data' });
-  }
-  const matches = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/);
-  if (!matches) return res.status(400).json({ error: 'Invalid data URL format' });
-  const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
-  const buffer = Buffer.from(matches[2], 'base64');
-  const filename = `${crypto.randomUUID()}.${ext}`;
-  fs.writeFileSync(path.join(ORDERS_ASSETS_DIR, filename), buffer);
-  res.json({ imageUrl: `/orders-assets/${filename}` });
-});
 
 app.post('/api/address/validate', apiLimiter, async (req, res) => {
   const { address } = req.body;
@@ -472,7 +461,7 @@ const VALID_STATUSES = ['pending', 'paid', 'processing', 'shipped', 'cancelled']
 function requireAdmin(req, res, next) {
   const token = req.headers.authorization?.startsWith('Bearer ')
     ? req.headers.authorization.slice(7)
-    : req.query.token;
+    : null;
   if (!token || !adminTokens.has(token)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
@@ -501,7 +490,7 @@ app.get('/api/admin/orders', requireAdmin, (req, res) => {
   res.json(getAllOrders(status));
 });
 
-app.get('/api/admin/orders/:reference/download', requireAdmin, (req, res) => {
+app.get('/api/admin/orders/:reference/download', apiLimiter, requireAdmin, (req, res) => {
   const order = getOrderByReference(req.params.reference);
   if (!order) return res.status(404).json({ error: 'Order not found' });
 
