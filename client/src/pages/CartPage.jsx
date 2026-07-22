@@ -183,10 +183,7 @@ export default function CartPage() {
                       style={styles.rateRadio}
                     />
                     <div style={styles.rateInfo}>
-                      <span style={styles.rateName}>{rate.service}</span>
-                      {rate.description && (
-                        <span style={styles.rateDesc}>{rate.description}</span>
-                      )}
+                      <span style={styles.rateName}>{rate.description || rate.service}</span>
                       {rate.deliveryDate && (
                         <span style={styles.rateDelivery}>
                           Est. {formatDeliveryDate(rate.deliveryDate)}

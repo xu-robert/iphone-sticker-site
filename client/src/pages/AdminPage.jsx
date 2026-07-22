@@ -120,6 +120,9 @@ function OrderRow({ order, onStatusChange }) {
 
           <div style={styles.detailSection}>
             <h4 style={styles.detailTitle}>Shipping</h4>
+            {order.shipping_service && (
+              <p style={styles.shippingService}>{order.shipping_service}</p>
+            )}
             <p style={styles.address}>
               {order.shipping_name}<br />
               {order.shipping_line1}<br />
@@ -306,6 +309,10 @@ const styles = {
   },
   itemImg: { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' },
   itemPrice: { marginLeft: 'auto', fontWeight: 600 },
+  shippingService: {
+    fontSize: '0.85rem', fontWeight: 600, color: '#007aff',
+    margin: '0 0 0.4rem', fontFamily: 'monospace',
+  },
   address: { fontSize: '0.9rem', lineHeight: 1.5, margin: 0 },
   totalsGrid: {
     display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.25rem 1rem',

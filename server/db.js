@@ -53,6 +53,9 @@ const cols = db.prepare("PRAGMA table_info(orders)").all().map(c => c.name);
 if (!cols.includes('tax_cents')) {
   db.exec("ALTER TABLE orders ADD COLUMN tax_cents INTEGER NOT NULL DEFAULT 0");
 }
+if (!cols.includes('shipping_service')) {
+  db.exec("ALTER TABLE orders ADD COLUMN shipping_service TEXT");
+}
 
 function generateReference() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -69,13 +72,14 @@ export function createOrder(data) {
   const stmt = db.prepare(`
     INSERT INTO orders (reference, email, shipping_name, shipping_line1, shipping_line2,
       shipping_city, shipping_state, shipping_zip, shipping_country,
-      subtotal_cents, shipping_cents, tax_cents, total_cents, stripe_session_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      subtotal_cents, shipping_cents, tax_cents, total_cents, stripe_session_id, shipping_service)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     reference, data.email, data.name, data.line1, data.line2 || null,
     data.city, data.state, data.zip, data.country || 'CA',
     data.subtotalCents, data.shippingCents, data.taxCents || 0, data.totalCents, data.stripeSessionId || null,
+    data.shippingService || null,
   );
   return { id: result.lastInsertRowid, reference };
 }

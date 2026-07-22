@@ -1,126 +1,26 @@
-import { SHIPPING_FLAT_CENTS } from './pricing.js';
+// --- Stallion Express (multi-carrier rates) ---
 
-// --- Shippo (address validation) ---
+const STALLION_BASE = process.env.STALLION_SANDBOX === 'true'
+  ? 'https://sandbox.stallion.ca/api/v5'
+  : 'https://ship.stallion.ca/api/v5';
+const STALLION_RATE_URL = `${STALLION_BASE}/rates`;
 
-const SHIPPO_BASE = 'https://api.goshippo.com';
-
-function getShippoToken() {
-  return process.env.SHIPPO_API_TOKEN || null;
+function getStallionToken() {
+  return process.env.STALLION_API_TOKEN || null;
 }
 
-// --- Canada Post (Expedited Parcel rates) ---
-
-const CP_TOKEN_URL = 'https://api.canadapost-postescanada.ca/prod/devportal-portaildesdeveloppeurs/cpc-api-native-oauth-provider/oauth2/token';
-const CP_RATE_URL = 'https://api.canadapost-postescanada.ca/prod/devportal-portaildesdeveloppeurs/rating/v1/prices';
-
-let cpTokenCache = { token: null, expiresAt: 0 };
-
-async function getCPAuth() {
-  const clientId = process.env.CANADAPOST_API_KEY;
-  const clientSecret = process.env.CANADAPOST_API_SECRET;
-  if (!clientId || !clientSecret) return null;
-
-  if (cpTokenCache.token && Date.now() < cpTokenCache.expiresAt) {
-    return cpTokenCache.token;
-  }
-
-  try {
-    const res = await fetch(CP_TOKEN_URL, {
-      method: 'POST',
-      headers: {
-        'X-IBM-Client-Id': clientId,
-        'X-IBM-Client-Secret': clientSecret,
-        'Accept': 'application/json',
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: 'scope=merchant&grant_type=client_credentials',
-      signal: AbortSignal.timeout(5000),
-    });
-
-    if (!res.ok) {
-      console.error('Canada Post OAuth error:', res.status);
-      return null;
-    }
-
-    const data = await res.json();
-    cpTokenCache.token = data.access_token;
-    cpTokenCache.expiresAt = Date.now() + (data.expires_in - 60) * 1000;
-    return data.access_token;
-  } catch (err) {
-    console.error('Canada Post OAuth fetch error:', err.message);
-    return null;
-  }
-}
-
-function getCPCustomerNumber() {
-  return process.env.CANADAPOST_CUSTOMER_NUMBER || null;
-}
-
-function getCPOriginPostal() {
-  return (process.env.CANADAPOST_ORIGIN_POSTAL || 'M5V1A1').replace(/\s/g, '');
+function getOriginPostal() {
+  return (process.env.STALLION_ORIGIN_POSTAL || process.env.CANADAPOST_ORIGIN_POSTAL || 'M5V1A1').replace(/\s/g, '');
 }
 
 export function isConfigured() {
-  const key = process.env.CANADAPOST_API_KEY;
-  const secret = process.env.CANADAPOST_API_SECRET;
-  return !!getShippoToken() || !!(key && secret);
+  return !!getStallionToken();
 }
 
 // --- Address validation ---
 
 export async function validateAddress(address) {
-  const token = getShippoToken();
-  if (!token) {
-    return formatValidation(address);
-  }
-
-  try {
-    const res = await fetch(`${SHIPPO_BASE}/addresses`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `ShippoToken ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        name: address.name || 'Recipient',
-        street1: address.line1,
-        street2: address.line2 || '',
-        city: address.city,
-        state: address.state,
-        zip: address.zip,
-        country: address.country || 'CA',
-        validate: true,
-      }),
-    });
-
-    if (!res.ok) return formatValidation(address);
-
-    const data = await res.json();
-    if (data.validation_results?.is_valid) {
-      return {
-        valid: true, errors: [],
-        suggested: {
-          line1: data.street1 || address.line1,
-          line2: data.street2 || address.line2 || '',
-          city: data.city || address.city,
-          state: data.state || address.state,
-          zip: data.zip || address.zip,
-          country: data.country || address.country || 'CA',
-        },
-        candidates: [],
-      };
-    }
-
-    const messages = data.validation_results?.messages || [];
-    return {
-      valid: false,
-      errors: messages.length > 0 ? messages.map(m => m.text) : ['Address could not be validated'],
-      suggested: null, candidates: [],
-    };
-  } catch (err) {
-    console.error('Shippo address validation error:', err.message);
-    return formatValidation(address);
-  }
+  return formatValidation(address);
 }
 
 function formatValidation(address) {
@@ -168,54 +68,87 @@ function getLetterMailTransit(destPostalCode) {
   return 4;
 }
 
-async function fetchCPExpeditedRate(destPostalCode) {
-  const token = await getCPAuth();
+const FSA_TO_PROVINCE = {
+  A: 'NL', B: 'NS', C: 'PE', E: 'NB',
+  G: 'QC', H: 'QC', J: 'QC',
+  K: 'ON', L: 'ON', M: 'ON', N: 'ON', P: 'ON',
+  R: 'MB', S: 'SK', T: 'AB',
+  V: 'BC', X: 'NT', Y: 'YT',
+};
+
+async function fetchStallionRates(destPostalCode, destCountry) {
+  const token = getStallionToken();
   if (!token) return null;
 
-  const origin = getCPOriginPostal();
+  const country = (destCountry || 'CA').toUpperCase();
   const dest = destPostalCode.replace(/\s/g, '').toUpperCase();
+  const fsa = dest.charAt(0);
 
   const body = {
-    customerNumber: getCPCustomerNumber() || undefined,
-    quoteType: getCPCustomerNumber() ? 'commercial' : 'counter',
-    parcelCharacteristics: {
-      weight: 0.1,
-      dimensions: { length: 20, width: 15, height: 2 },
+    type: 'regular',
+    from_address: {
+      postal_code: getOriginPostal(),
+      country_code: 'CA',
     },
-    services: ['DOM.EP'],
-    originPostalCode: origin,
-    destination: { domestic: { postalCode: dest } },
+    to_address: {
+      name: 'Customer',
+      address1: '123 Main St',
+      city: 'Destination',
+      province_code: FSA_TO_PROVINCE[fsa] || 'ON',
+      postal_code: dest,
+      country_code: country,
+      is_residential: true,
+    },
+    packages: [{
+      weight: 0.1,
+      weight_unit: 'kg',
+      length: 20,
+      width: 15,
+      height: 2,
+      size_unit: 'cm',
+    }],
+    items: [{
+      title: 'Custom stickers',
+      quantity: 1,
+      value: 10,
+      currency: 'CAD',
+    }],
   };
 
   try {
-    const res = await fetch(CP_RATE_URL, {
+    const res = await fetch(STALLION_RATE_URL, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'Accept-Language': 'en-CA',
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(5000),
     });
 
     if (!res.ok) {
-      console.error('Canada Post rate error:', res.status);
+      console.error('Stallion rate error:', res.status);
       return null;
     }
 
     const data = await res.json();
-    const quote = Array.isArray(data) ? data.find(q => q.serviceCode === 'DOM.EP') || data[0] : data;
-    if (!quote) return null;
+    const rates = (data.data || [])
+      .filter(r => r.trackable)
+      .sort((a, b) => a.total - b.total)
+      .slice(0, 3)
+      .map(r => ({
+        service: `stallion.${r.service}`,
+        carrier: r.carrier,
+        serviceName: r.service_name,
+        priceCents: Math.round(r.total * 100),
+        currency: (r.currency || 'CAD').toLowerCase(),
+        deliveryDays: r.estimated_delivery_days || null,
+      }));
 
-    return {
-      priceCents: Math.round(parseFloat(quote.priceDetails?.due) * 100),
-      deliveryDate: quote.serviceStandard?.expectedDeliveryDate || null,
-      deliveryDays: parseInt(quote.serviceStandard?.expectedTransitTime) || null,
-    };
+    return rates.length > 0 ? rates : null;
   } catch (err) {
-    console.error('Canada Post rate fetch error:', err.message);
+    console.error('Stallion rate fetch error:', err.message);
     return null;
   }
 }
@@ -256,10 +189,9 @@ export async function getShippingRates(destPostalCode, destCountry) {
       deliveryDays: totalDays,
     };
 
-    let tracked = {
+    const fallbackTracked = {
       service: 'Tracked Shipping',
       description: zone.description,
-      serviceCode: null,
       carrier: 'Canada Post',
       priceCents: zone.priceCents,
       currency: 'cad',
@@ -268,44 +200,65 @@ export async function getShippingRates(destPostalCode, destCountry) {
       deliveryDays: PROCESSING_DAYS + zone.days,
     };
 
-    const cpRate = await Promise.race([
-      fetchCPExpeditedRate(destPostalCode),
-      new Promise(resolve => setTimeout(() => resolve(null), 5000)),
-    ]);
-    if (cpRate) {
-      const days = PROCESSING_DAYS + (cpRate.deliveryDays || zone.days);
-      tracked = {
-        service: 'Tracked Shipping',
-        description: 'Canada Post Expedited Parcel',
-        serviceCode: 'DOM.EP',
-        carrier: 'Canada Post',
-        priceCents: cpRate.priceCents,
-        currency: 'cad',
-        deliveryDate: cpRate.deliveryDate || estimateDate(days),
-        deliveryDateLate: estimateDate(days + 2),
-        deliveryDays: days,
-      };
+    const stallionRates = await fetchStallionRates(destPostalCode, 'CA');
+    let trackedOptions;
+    let source;
+
+    if (stallionRates) {
+      trackedOptions = stallionRates.map(r => ({
+        service: r.service,
+        description: `${r.carrier} — ${r.serviceName}`,
+        carrier: r.carrier,
+        priceCents: r.priceCents,
+        currency: r.currency,
+        deliveryDate: r.deliveryDays ? estimateDate(PROCESSING_DAYS + r.deliveryDays) : null,
+        deliveryDateLate: r.deliveryDays ? estimateDate(PROCESSING_DAYS + r.deliveryDays + 2) : null,
+        deliveryDays: r.deliveryDays ? PROCESSING_DAYS + r.deliveryDays : null,
+      }));
+      source = 'stallion';
+    } else {
+      trackedOptions = [fallbackTracked];
+      source = 'estimate';
     }
 
-    const domesticResult = { source: tracked.serviceCode ? 'canadapost' : 'estimate', rates: [lettermail, tracked] };
+    const domesticResult = { source, rates: [lettermail, ...trackedOptions] };
     ratesCache.set(cacheKey, { data: domesticResult, expiresAt: Date.now() + RATES_CACHE_TTL });
     return domesticResult;
   }
 
-  const intlResult = {
-    source: 'estimate',
-    rates: [{
-      service: 'International Shipping',
-      description: country === 'US' ? 'Canada Post Tracked Packet — USA' : 'Canada Post International',
-      serviceCode: null,
-      carrier: 'Canada Post',
-      priceCents: country === 'US' ? 1499 : 1999,
-      currency: 'cad',
-      deliveryDate: estimateDate(country === 'US' ? 10 : 15),
-      deliveryDateLate: estimateDate(country === 'US' ? 15 : 25),
-      deliveryDays: country === 'US' ? 10 : 15,
-    }],
-  };
+  const stallionRates = await fetchStallionRates(destPostalCode, country);
+  let intlResult;
+
+  if (stallionRates) {
+    intlResult = {
+      source: 'stallion',
+      rates: stallionRates.map(r => ({
+        service: r.service,
+        description: `${r.carrier} — ${r.serviceName}`,
+        carrier: r.carrier,
+        priceCents: r.priceCents,
+        currency: r.currency,
+        deliveryDate: r.deliveryDays ? estimateDate(PROCESSING_DAYS + r.deliveryDays) : null,
+        deliveryDateLate: r.deliveryDays ? estimateDate(PROCESSING_DAYS + r.deliveryDays + 2) : null,
+        deliveryDays: r.deliveryDays ? PROCESSING_DAYS + r.deliveryDays : null,
+      })),
+    };
+  } else {
+    intlResult = {
+      source: 'estimate',
+      rates: [{
+        service: 'International Shipping',
+        description: country === 'US' ? 'Tracked Packet — USA' : 'International Parcel',
+        carrier: 'Canada Post',
+        priceCents: country === 'US' ? 1499 : 1999,
+        currency: 'cad',
+        deliveryDate: estimateDate(country === 'US' ? 10 : 15),
+        deliveryDateLate: estimateDate(country === 'US' ? 15 : 25),
+        deliveryDays: country === 'US' ? 10 : 15,
+      }],
+    };
+  }
+
   ratesCache.set(cacheKey, { data: intlResult, expiresAt: Date.now() + RATES_CACHE_TTL });
   return intlResult;
 }

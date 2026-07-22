@@ -368,7 +368,7 @@ app.post('/api/checkout', checkoutLimiter, async (req, res) => {
     const matched = getCachedRate(shipping.zip, shipping.country || 'CA', shippingService);
     if (matched) {
       appliedShipping = matched.priceCents;
-    } else if (shippingService === 'Tracked Shipping') {
+    } else if (shippingService !== 'Standard Shipping') {
       const fsa = shipping.zip.replace(/\s/g, '').charAt(0).toUpperCase();
       appliedShipping = (TRACKED_RATES[fsa] || TRACKED_DEFAULT).priceCents;
     }
@@ -383,6 +383,7 @@ app.post('/api/checkout', checkoutLimiter, async (req, res) => {
     city: shipping.city, state: shipping.state, zip: shipping.zip,
     country: shipping.country || 'CA',
     subtotalCents, shippingCents: appliedShipping, taxCents, totalCents,
+    shippingService: shippingService || null,
   });
 
   for (const item of validatedItems) {

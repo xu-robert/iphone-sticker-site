@@ -26,14 +26,9 @@ RESEND_API_KEY=re_...
 RESEND_FROM=orders@yourdomain.com
 ADMIN_PASSWORD=your-admin-password
 
-# Canada Post (optional — falls back to flat-rate estimates without it)
-CANADAPOST_API_KEY=your-client-id
-CANADAPOST_API_SECRET=your-client-secret
-CANADAPOST_CUSTOMER_NUMBER=0001234567
-CANADAPOST_ORIGIN_POSTAL=M5V1A1
-
-# Shippo (optional — address validation only)
-SHIPPO_API_TOKEN=shippo_test_...
+# Stallion Express (optional — falls back to zone-based estimates without it)
+STALLION_API_TOKEN=your-api-token
+STALLION_ORIGIN_POSTAL=M5V1A1
 ```
 
 All are optional for local dev — features degrade gracefully (no payments, no emails, no admin, estimated shipping rates).
@@ -75,9 +70,9 @@ client/                     React SPA (Vite)
 server/
   index.js                  Express + WebSocket server, Stripe checkout/webhooks, image upload,
                             order API, admin API, Resend email integration
-  shipping.js               Shipping integration — Canada Post API (OAuth + rating) for live
-                            Expedited Parcel rates, Shippo for address validation, lettermail
-                            estimates by postal code distance. Falls back to flat rates
+  shipping.js               Shipping integration — Stallion Express API for multi-carrier
+                            tracked rates, lettermail estimates by postal code distance.
+                            Falls back to zone-based rates when API is unavailable
   sessions.js               In-memory session store (phone-to-desktop pairing), 24h expiry
   db.js                     SQLite database for orders and order items (better-sqlite3)
   pricing.js                Sticker size/price definitions and shipping cost
@@ -103,6 +98,6 @@ server/
 - **Contour tracing**: Generates bezier curve outlines around stickers for die-cut lines.
 - **Sticker editing**: Edited stickers (borders, cutouts, background removal) are uploaded as PNG to the server via FormData. Cart stores server URLs, avoiding localStorage size limits.
 - **Cart persistence**: Stored in localStorage so it survives page refreshes. Cleared on successful checkout.
-- **Shipping**: Canada Post API (OAuth 2.0) for live Expedited Parcel rates and delivery dates. Lettermail estimates calculated by postal code distance from Toronto. Shippo for address validation. Province-based Canadian tax calculation (HST/GST/PST/QST). Falls back to flat-rate estimates when API credentials aren't set.
+- **Shipping**: Stallion Express API for multi-carrier tracked shipping rates (UPS, FedEx, Purolator, Canada Post). Lettermail estimates calculated by postal code distance from Toronto. Province-based Canadian tax calculation (HST/GST/PST/QST). Falls back to zone-based estimates when API credentials aren't set.
 - **Payments**: Stripe Checkout Sessions with webhook for payment confirmation. Currency configurable via `STRIPE_CURRENCY`.
 - **Emails**: Order confirmation via Resend. Recipient emails are lowercased before sending (Resend is case-sensitive).
