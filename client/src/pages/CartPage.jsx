@@ -8,7 +8,7 @@ function formatDeliveryDate(dateStr) {
 }
 
 export default function CartPage() {
-  const { items, pricing, removeItem, updateItemQuantity, updateItemSize, clearCart, subtotalCents } = useCart();
+  const { items, pricing, removeItem, updateItemQuantity, updateItemSize, subtotalCents } = useCart();
   const [shipping, setShipping] = useState({ email: '', name: '', line1: '', line2: '', city: '', state: '', zip: '', country: 'CA' });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -84,7 +84,6 @@ export default function CartPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Checkout failed');
-      clearCart();
       window.location.href = data.checkoutUrl;
     } catch (err) {
       setError(err.message);

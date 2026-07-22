@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { useCart } from '../context/CartContext';
 
 export default function OrderConfirmationPage() {
   const { reference } = useParams();
+  const { clearCart } = useCart();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -10,6 +12,7 @@ export default function OrderConfirmationPage() {
   useEffect(() => {
     fetch(`/api/order/${reference}`)
       .then(r => r.ok ? r.json() : Promise.reject('Order not found'))
+      .then(data => { clearCart(); return data; })
       .then(setOrder)
       .catch(e => setError(typeof e === 'string' ? e : e.message))
       .finally(() => setLoading(false));
